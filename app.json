@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "AI-English-partner",
-    "slug": "AI-English-partner",
+    "name": "AI English Partner",
+    "slug": "ai-english-partner",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
