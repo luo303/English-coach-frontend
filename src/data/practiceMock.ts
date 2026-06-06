@@ -380,4 +380,5 @@ export const tabs: TabItem[] = [
   { key: 'conversation', label: '对话', icon: '◐' },
   { key: 'summary', label: '总结', icon: '▣' },
   { key: 'history', label: '历史', icon: '≡' },
+  { key: 'audio', label: '音频', icon: '≋' },
 ];

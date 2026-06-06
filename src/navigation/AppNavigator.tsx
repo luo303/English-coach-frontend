@@ -4,6 +4,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { AppPalette } from '@/constants/appPalette';
 import { scenarios, tabs } from '@/data/practiceMock';
+import { AudioSpikeScreen } from '@/screens/AudioSpikeScreen';
 import { HistoryScreen } from '@/screens/HistoryScreen';
 import { PracticeScreen } from '@/screens/PracticeScreen';
 import { ScenarioSelectScreen } from '@/screens/ScenarioSelectScreen';
@@ -39,6 +40,7 @@ export function AppNavigator() {
             <SessionSummaryScreen onPracticeAgain={() => setActiveTab('practice')} />
           ) : null}
           {activeTab === 'history' ? <HistoryScreen /> : null}
+          {activeTab === 'audio' ? <AudioSpikeScreen /> : null}
         </View>
 
         <View
