@@ -1,53 +1,141 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { AppPalette } from '@/constants/appPalette';
+import { RealtimeHint, RealtimeScoreSnapshot, TranscriptTurn } from '@/types/realtime';
 
-export function TranscriptPanel() {
+type TranscriptPanelProps = {
+  hints: RealtimeHint[];
+  partialTurn?: TranscriptTurn | null;
+  score: RealtimeScoreSnapshot;
+  turns: TranscriptTurn[];
+};
+
+const hintColors: Record<RealtimeHint['type'], { background: string; border: string }> = {
+  expression: { background: AppPalette.greenSoft, border: '#BCE7CC' },
+  grammar: { background: '#FFF0F5', border: '#FFD1E1' },
+  pronunciation: { background: AppPalette.amberSoft, border: '#F4D58B' },
+  system: { background: '#F3F4F6', border: AppPalette.line },
+  timing: { background: AppPalette.amberSoft, border: '#F4D58B' },
+};
+
+export function TranscriptPanel({ hints, partialTurn, score, turns }: TranscriptPanelProps) {
+  const visibleTurns = partialTurn ? [...turns, partialTurn] : turns;
+
   return (
     <>
-      <View style={styles.chatBubbleLeft}>
-        <Text style={styles.chatText}>Can you summarize what blocked the release this week?</Text>
+      <View style={styles.scoreCard}>
+        <View>
+          <Text style={styles.scoreLabel}>实时表现</Text>
+          <Text style={styles.scoreValue}>{score.overall}</Text>
+        </View>
+        <View style={styles.scorePillRow}>
+          <Text style={styles.scorePill}>发音 {score.pronunciation}</Text>
+          <Text style={styles.scorePill}>语法 {score.grammar}</Text>
+          <Text style={styles.scorePill}>流利 {score.fluency}</Text>
+        </View>
       </View>
-      <View style={styles.chatBubbleRight}>
-        <Text style={styles.chatText}>The QA found two critical bugs and we need one more day to verify.</Text>
-      </View>
-      <View style={styles.coachNote}>
-        <Text style={styles.noteTitle}>时机控制</Text>
-        <Text style={styles.noteText}>表达正确，暂不打断。课后加入 “risk mitigation” 表达拓展。</Text>
-      </View>
+
+      {visibleTurns.map((turn) => {
+        const isAssistant = turn.speaker === 'assistant';
+        return (
+          <View
+            key={`${turn.turnId}-${turn.isFinal ? 'final' : 'partial'}`}
+            style={[styles.chatBubble, isAssistant ? styles.chatBubbleLeft : styles.chatBubbleRight]}
+          >
+            <Text style={styles.speakerLabel}>{isAssistant ? 'AI Coach' : 'You'}</Text>
+            <Text style={[styles.chatText, !turn.isFinal && styles.partialText]}>{turn.text}</Text>
+          </View>
+        );
+      })}
+
+      {hints.map((hint) => {
+        const colors = hintColors[hint.type];
+        return (
+          <View
+            key={hint.id}
+            style={[styles.coachNote, { backgroundColor: colors.background, borderColor: colors.border }]}
+          >
+            <Text style={styles.noteTitle}>{hint.title}</Text>
+            <Text style={styles.noteText}>{hint.message}</Text>
+          </View>
+        );
+      })}
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  chatBubbleLeft: {
-    alignSelf: 'flex-start',
+  scoreCard: {
+    alignItems: 'center',
     backgroundColor: AppPalette.card,
     borderColor: AppPalette.line,
     borderRadius: 16,
     borderWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     marginBottom: 12,
-    maxWidth: '84%',
     padding: 15,
+  },
+  scoreLabel: {
+    color: AppPalette.muted,
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  scoreValue: {
+    color: AppPalette.ink,
+    fontSize: 30,
+    fontWeight: '900',
+  },
+  scorePillRow: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  scorePill: {
+    backgroundColor: AppPalette.blueSoft,
+    borderRadius: 999,
+    color: AppPalette.blue,
+    fontSize: 12,
+    fontWeight: '900',
+    overflow: 'hidden',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  chatBubble: {
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 15,
+  },
+  chatBubbleLeft: {
+    alignSelf: 'flex-start',
+    backgroundColor: AppPalette.card,
+    borderColor: AppPalette.line,
+    maxWidth: '84%',
   },
   chatBubbleRight: {
     alignSelf: 'flex-end',
     backgroundColor: AppPalette.blueSoft,
     borderColor: '#BFD2FF',
-    borderRadius: 16,
-    borderWidth: 1,
-    marginBottom: 14,
     maxWidth: '86%',
-    padding: 15,
+  },
+  speakerLabel: {
+    color: AppPalette.faint,
+    fontSize: 12,
+    fontWeight: '900',
+    marginBottom: 5,
+    textTransform: 'uppercase',
   },
   chatText: {
     color: AppPalette.ink,
     fontSize: 17,
     lineHeight: 24,
   },
+  partialText: {
+    color: AppPalette.muted,
+    fontStyle: 'italic',
+  },
   coachNote: {
-    backgroundColor: AppPalette.amberSoft,
-    borderColor: '#F4D58B',
     borderRadius: 16,
     borderWidth: 1,
     marginBottom: 14,

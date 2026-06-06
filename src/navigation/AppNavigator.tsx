@@ -4,10 +4,13 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { AppPalette } from '@/constants/appPalette';
 import { scenarios, tabs } from '@/data/practiceMock';
+import { AudioSpikeScreen } from '@/screens/AudioSpikeScreen';
 import { HistoryScreen } from '@/screens/HistoryScreen';
+import { LoginScreen } from '@/screens/LoginScreen';
 import { PracticeScreen } from '@/screens/PracticeScreen';
 import { ScenarioSelectScreen } from '@/screens/ScenarioSelectScreen';
 import { SessionSummaryScreen } from '@/screens/SessionSummaryScreen';
+import { useAuthStore } from '@/state/authStore';
 import { TabKey } from '@/types/practice';
 
 const TAB_BAR_HEIGHT = 72;
@@ -15,6 +18,7 @@ const TAB_BAR_HEIGHT = 72;
 export function AppNavigator() {
   const [activeTab, setActiveTab] = useState<TabKey>('practice');
   const [selectedScenario, setSelectedScenario] = useState('meeting');
+  const isAuthenticated = useAuthStore((state) => state.status === 'authenticated');
   const insets = useSafeAreaInsets();
   const currentScenario = useMemo(
     () => scenarios.find((scenario) => scenario.id === selectedScenario) ?? scenarios[0],
@@ -23,6 +27,8 @@ export function AppNavigator() {
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
+      {!isAuthenticated ? <LoginScreen /> : null}
+      {isAuthenticated ? (
       <View style={styles.shell}>
         <View style={styles.content}>
           {activeTab === 'practice' ? (
@@ -39,6 +45,7 @@ export function AppNavigator() {
             <SessionSummaryScreen onPracticeAgain={() => setActiveTab('practice')} />
           ) : null}
           {activeTab === 'history' ? <HistoryScreen /> : null}
+          {activeTab === 'audio' ? <AudioSpikeScreen /> : null}
         </View>
 
         <View
@@ -68,6 +75,7 @@ export function AppNavigator() {
           })}
         </View>
       </View>
+      ) : null}
     </SafeAreaView>
   );
 }

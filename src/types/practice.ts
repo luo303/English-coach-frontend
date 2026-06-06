@@ -1,4 +1,4 @@
-export type TabKey = 'practice' | 'conversation' | 'summary' | 'history';
+export type TabKey = 'practice' | 'conversation' | 'summary' | 'history' | 'audio';
 
 export type Scenario = {
   id: string;
