@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AppPalette } from '@/constants/appPalette';
-import { PracticeSessionState } from '@/types/practice';
+import { PracticeSessionState } from '@/types/realtime';
 
 type RealtimeControlsProps = {
   onInterrupt: () => void;

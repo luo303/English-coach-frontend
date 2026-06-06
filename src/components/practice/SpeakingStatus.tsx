@@ -2,7 +2,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { AppPalette } from '@/constants/appPalette';
 import { AudioLevelMeter } from '@/components/practice/AudioLevelMeter';
-import { PracticeSessionState } from '@/types/practice';
+import { PracticeSessionState } from '@/types/realtime';
 
 type SpeakingStatusProps = {
   elapsedSec: number;
@@ -20,6 +20,7 @@ const statusCopy: Record<PracticeSessionState, string> = {
   interrupting: '已打断 AI · 等待你继续',
   listening: '请继续说 · 停顿后 AI 接话',
   report_generating: '正在生成课后报告',
+  summary_ready: '课后报告已生成',
   user_speaking: '实时转写中 · 保持自然表达',
 };
 

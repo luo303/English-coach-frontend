@@ -1,7 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { AppPalette } from '@/constants/appPalette';
-import { RealtimeHint, RealtimeScoreSnapshot, TranscriptTurn } from '@/types/practice';
+import { RealtimeHint, RealtimeScoreSnapshot, TranscriptTurn } from '@/types/realtime';
 
 type TranscriptPanelProps = {
   hints: RealtimeHint[];
@@ -14,6 +14,7 @@ const hintColors: Record<RealtimeHint['type'], { background: string; border: str
   expression: { background: AppPalette.greenSoft, border: '#BCE7CC' },
   grammar: { background: '#FFF0F5', border: '#FFD1E1' },
   pronunciation: { background: AppPalette.amberSoft, border: '#F4D58B' },
+  system: { background: '#F3F4F6', border: AppPalette.line },
   timing: { background: AppPalette.amberSoft, border: '#F4D58B' },
 };
 

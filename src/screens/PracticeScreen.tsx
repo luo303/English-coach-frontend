@@ -1,18 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 
 import { AppPalette } from '@/constants/appPalette';
 import { RealtimeControls } from '@/components/practice/RealtimeControls';
 import { SpeakingStatus } from '@/components/practice/SpeakingStatus';
 import { TranscriptPanel } from '@/components/practice/TranscriptPanel';
-import { initialRealtimeScore, mockRealtimeTimeline } from '@/data/practiceMock';
-import {
-  PracticeSessionState,
-  RealtimeHint,
-  RealtimeScoreSnapshot,
-  Scenario,
-  TranscriptTurn,
-} from '@/types/practice';
+import { mockRealtimeTimeline } from '@/data/practiceMock';
+import { useSessionStore } from '@/state/sessionStore';
+import { Scenario } from '@/types/practice';
+import { PracticeSessionState } from '@/types/realtime';
 
 type PracticeScreenProps = {
   scenario: Scenario;
@@ -29,61 +25,41 @@ const statusLabel: Record<PracticeSessionState, string> = {
   interrupting: '已打断',
   listening: '监听中',
   report_generating: '生成报告',
+  summary_ready: '报告已生成',
   user_speaking: '用户说话',
 };
 
 export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
-  const [audioLevel, setAudioLevel] = useState(8);
-  const [elapsedSec, setElapsedSec] = useState(0);
-  const [hints, setHints] = useState<RealtimeHint[]>([]);
-  const [latencyMs, setLatencyMs] = useState(238);
-  const [partialTurn, setPartialTurn] = useState<TranscriptTurn | null>(null);
-  const [score, setScore] = useState<RealtimeScoreSnapshot>(initialRealtimeScore);
-  const [status, setStatus] = useState<PracticeSessionState>('connecting');
-  const [turns, setTurns] = useState<TranscriptTurn[]>([]);
+  const audioLevel = useSessionStore((state) => state.audioLevel);
+  const dispatchRealtimeEvent = useSessionStore((state) => state.dispatchRealtimeEvent);
+  const elapsedSec = useSessionStore((state) => state.elapsedSec);
+  const hints = useSessionStore((state) => state.hints);
+  const latencyMs = useSessionStore((state) => state.latencyMs);
+  const partialTurn = useSessionStore((state) => state.partialTurn);
+  const score = useSessionStore((state) => state.score);
+  const sessionId = useSessionStore((state) => state.sessionId);
+  const status = useSessionStore((state) => state.status);
+  const turns = useSessionStore((state) => state.turns);
   const timeoutRefs = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   useEffect(() => {
+    dispatchRealtimeEvent({
+      payload: {
+        scenario,
+        sessionId: 'mock_session_001',
+      },
+      type: 'local.reset_session',
+    });
+
     const elapsedTimer = setInterval(() => {
-      setElapsedSec((current) => current + 1);
+      dispatchRealtimeEvent({
+        type: 'local.tick',
+      });
     }, 1000);
 
     mockRealtimeTimeline.forEach((step) => {
       const timeoutId = setTimeout(() => {
-        setStatus(step.status);
-
-        if (typeof step.audioLevel === 'number') {
-          setAudioLevel(step.audioLevel);
-        }
-
-        if (typeof step.latencyMs === 'number') {
-          setLatencyMs(step.latencyMs);
-        }
-
-        if (step.partialTurn) {
-          setPartialTurn(step.partialTurn);
-        }
-
-        const finalTurn = step.finalTurn;
-        if (finalTurn) {
-          setTurns((currentTurns) => {
-            const withoutSameTurn = currentTurns.filter((turn) => turn.turnId !== finalTurn.turnId);
-            return [...withoutSameTurn, finalTurn];
-          });
-          setPartialTurn((currentPartial) => (currentPartial?.turnId === finalTurn.turnId ? null : currentPartial));
-        }
-
-        const hint = step.hint;
-        if (hint) {
-          setHints((currentHints) => {
-            const withoutSameHint = currentHints.filter((currentHint) => currentHint.id !== hint.id);
-            return [hint, ...withoutSameHint].slice(0, 3);
-          });
-        }
-
-        if (step.score) {
-          setScore(step.score);
-        }
+        dispatchRealtimeEvent(step.event);
       }, step.delayMs);
 
       timeoutRefs.current.push(timeoutId);
@@ -94,31 +70,34 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
       timeoutRefs.current.forEach(clearTimeout);
       timeoutRefs.current = [];
     };
-  }, []);
+  }, [dispatchRealtimeEvent, scenario]);
 
   const handleInterrupt = () => {
     timeoutRefs.current.forEach(clearTimeout);
     timeoutRefs.current = [];
-    setStatus('interrupting');
-    setAudioLevel(28);
-    setPartialTurn(null);
-    setHints((currentHints) => [
-      {
-        id: 'hint_interrupt',
-        message: '已发送 cancel_ai_speech，本地播放队列已清空。你可以继续补充。',
-        severity: 'low',
-        title: '已打断 AI',
-        type: 'timing',
-      },
-      ...currentHints,
-    ]);
+    dispatchRealtimeEvent({
+      type: 'local.cancel_ai_speech',
+    });
   };
 
   const handleEnd = () => {
     timeoutRefs.current.forEach(clearTimeout);
     timeoutRefs.current = [];
-    setStatus('report_generating');
-    setAudioLevel(0);
+    dispatchRealtimeEvent({
+      payload: {
+        reason: 'user_tap_end',
+        status: 'report_generating',
+      },
+      serverSeq: 999,
+      sessionId: sessionId ?? 'mock_session_001',
+      type: 'session_state',
+    });
+    dispatchRealtimeEvent({
+      payload: {
+        level: 0,
+      },
+      type: 'local.audio_level',
+    });
     setTimeout(onEnd, 550);
   };
 
