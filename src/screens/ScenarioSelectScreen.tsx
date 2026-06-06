@@ -16,6 +16,8 @@ export function ScenarioSelectScreen({
   onSelectScenario,
   onStart,
 }: ScenarioSelectScreenProps) {
+  const currentScenario = scenarios.find((scenario) => scenario.id === selectedScenario) ?? scenarios[0];
+
   return (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
       <ScreenTitle eyebrow="今日建议" title="场景训练" action="⌾" />
@@ -40,7 +42,7 @@ export function ScenarioSelectScreen({
       </View>
 
       <Pressable accessibilityRole="button" onPress={onStart} style={styles.primaryButton}>
-        <Text style={styles.primaryButtonText}>开始会议模拟</Text>
+        <Text style={styles.primaryButtonText}>开始{currentScenario.title}模拟</Text>
       </Pressable>
     </ScrollView>
   );

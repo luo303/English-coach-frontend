@@ -1,16 +1,25 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AppPalette } from '@/constants/appPalette';
+import { PracticeSessionState } from '@/types/practice';
 
 type RealtimeControlsProps = {
+  onInterrupt: () => void;
   onEnd: () => void;
+  status: PracticeSessionState;
 };
 
-export function RealtimeControls({ onEnd }: RealtimeControlsProps) {
+export function RealtimeControls({ onEnd, onInterrupt, status }: RealtimeControlsProps) {
+  const canInterrupt = status === 'assistant_speaking';
+
   return (
     <View style={styles.controlRow}>
-      <Pressable style={styles.secondaryButton}>
-        <Text style={styles.secondaryButtonText}>打断 AI</Text>
+      <Pressable
+        disabled={!canInterrupt}
+        onPress={onInterrupt}
+        style={[styles.secondaryButton, !canInterrupt && styles.disabledButton]}
+      >
+        <Text style={[styles.secondaryButtonText, !canInterrupt && styles.disabledButtonText]}>打断 AI</Text>
       </Pressable>
       <Pressable onPress={onEnd} style={styles.dangerButton}>
         <Text style={styles.dangerButtonText}>结束会话</Text>
@@ -39,6 +48,12 @@ const styles = StyleSheet.create({
     color: AppPalette.ink,
     fontSize: 16,
     fontWeight: '900',
+  },
+  disabledButton: {
+    opacity: 0.56,
+  },
+  disabledButtonText: {
+    color: AppPalette.faint,
   },
   dangerButton: {
     alignItems: 'center',
