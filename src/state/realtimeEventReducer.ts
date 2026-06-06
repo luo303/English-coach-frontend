@@ -62,6 +62,7 @@ export function reduceRealtimeEvent(
       return {
         ...initialSessionRealtimeState,
         connectionStatus: 'connecting',
+        clientSeq: 1,
         scenario: event.payload.scenario,
         sessionId: event.payload.sessionId,
         status: 'connecting',
@@ -89,6 +90,12 @@ export function reduceRealtimeEvent(
         status: 'interrupting',
       };
 
+    case 'local.connection_status':
+      return {
+        ...state,
+        connectionStatus: event.payload.status,
+      };
+
     case 'local.tick':
       return {
         ...state,
@@ -99,6 +106,7 @@ export function reduceRealtimeEvent(
       return {
         ...state,
         connectionStatus: 'connected',
+        clientSeq: state.clientSeq + 1,
         latencyMs: event.payload.latencyMs ?? state.latencyMs,
         latestServerSeq,
         sessionId: event.sessionId,
@@ -108,6 +116,7 @@ export function reduceRealtimeEvent(
     case 'pong':
       return {
         ...state,
+        clientSeq: state.clientSeq + 1,
         latencyMs: event.payload.estimatedRttMs,
         latestServerSeq,
       };
@@ -115,6 +124,7 @@ export function reduceRealtimeEvent(
     case 'transcript_delta':
       return {
         ...state,
+        clientSeq: state.clientSeq + 1,
         latestServerSeq,
         partialTurn: event.payload,
         status: event.payload.speaker === 'user' ? 'user_speaking' : 'assistant_speaking',
@@ -123,6 +133,7 @@ export function reduceRealtimeEvent(
     case 'ai_reply_delta':
       return {
         ...state,
+        clientSeq: state.clientSeq + 1,
         latestServerSeq,
         partialTurn: event.payload,
         status: 'assistant_speaking',
@@ -131,6 +142,7 @@ export function reduceRealtimeEvent(
     case 'transcript_final':
       return {
         ...state,
+        clientSeq: state.clientSeq + 1,
         latestServerSeq,
         partialTurn: state.partialTurn?.turnId === event.payload.turnId ? null : state.partialTurn,
         status: event.payload.speaker === 'user' ? 'assistant_thinking' : 'listening',
@@ -140,9 +152,17 @@ export function reduceRealtimeEvent(
     case 'ai_audio_chunk':
       return {
         ...state,
+        clientSeq: state.clientSeq + 1,
         latestServerSeq,
         playbackQueue: appendAudioChunk(state.playbackQueue, event.payload),
         status: 'assistant_speaking',
+      };
+
+    case 'audio_chunk_ack':
+      return {
+        ...state,
+        clientSeq: state.clientSeq + 1,
+        latestServerSeq,
       };
 
     case 'grammar_hint':
@@ -150,6 +170,7 @@ export function reduceRealtimeEvent(
     case 'pronunciation_hint':
       return {
         ...state,
+        clientSeq: state.clientSeq + 1,
         hints: prependHint(state.hints, event.payload),
         latestServerSeq,
       };
@@ -157,6 +178,7 @@ export function reduceRealtimeEvent(
     case 'score_snapshot':
       return {
         ...state,
+        clientSeq: state.clientSeq + 1,
         latestServerSeq,
         score: event.payload,
       };
@@ -164,6 +186,7 @@ export function reduceRealtimeEvent(
     case 'session_state':
       return {
         ...state,
+        clientSeq: state.clientSeq + 1,
         latestServerSeq,
         status: event.payload.status,
       };
@@ -172,6 +195,7 @@ export function reduceRealtimeEvent(
       return {
         ...state,
         connectionStatus: event.payload.recoverable ? state.connectionStatus : 'closed',
+        clientSeq: state.clientSeq + 1,
         hints: prependHint(state.hints, {
           id: `error_${event.payload.code}`,
           message: event.payload.message,

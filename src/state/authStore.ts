@@ -16,41 +16,26 @@ type AuthStore = {
   user: ApiUser | null;
 };
 
-function createMockUser(): ApiUser {
-  const now = Math.floor(Date.now() / 1000);
-
-  return {
-    createdAt: {
-      nanos: 0,
-      seconds: now,
-    },
-    level: 'beginner',
-    loginType: 'anonymous',
-    nickname: 'Mock Speaker',
-    updatedAt: {
-      nanos: 0,
-      seconds: now,
-    },
-    userId: `mock-user-${now}`,
-  };
-}
-
 export const useAuthStore = create<AuthStore>((set, get) => ({
   accessToken: null,
   error: null,
   login: async () => {
     set({ error: null, status: 'loading' });
 
-    await new Promise((resolve) => {
-      setTimeout(resolve, 350);
-    });
-
-    set({
-      accessToken: `mock-token-${Date.now()}`,
-      error: null,
-      status: 'authenticated',
-      user: createMockUser(),
-    });
+    try {
+      const response = await loginAnonymously();
+      set({
+        accessToken: response.accessToken,
+        error: null,
+        status: 'authenticated',
+        user: response.user,
+      });
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : 'Login failed.',
+        status: 'error',
+      });
+    }
   },
   loginWithBackend: async () => {
     set({ error: null, status: 'loading' });

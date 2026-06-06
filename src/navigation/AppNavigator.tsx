@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { fetchScenarios } from '@/clients/scenarioClient';
 import { AppPalette } from '@/constants/appPalette';
-import { scenarios, tabs } from '@/data/practiceMock';
 import { AudioSpikeScreen } from '@/screens/AudioSpikeScreen';
 import { HistoryScreen } from '@/screens/HistoryScreen';
 import { LoginScreen } from '@/screens/LoginScreen';
@@ -11,19 +11,78 @@ import { PracticeScreen } from '@/screens/PracticeScreen';
 import { ScenarioSelectScreen } from '@/screens/ScenarioSelectScreen';
 import { SessionSummaryScreen } from '@/screens/SessionSummaryScreen';
 import { useAuthStore } from '@/state/authStore';
-import { TabKey } from '@/types/practice';
+import { ScenarioRecord } from '@/types/api';
+import { Scenario, TabItem, TabKey } from '@/types/practice';
 
 const TAB_BAR_HEIGHT = 72;
 
+const tabs: TabItem[] = [
+  { key: 'practice', label: '练习', icon: '◎' },
+  { key: 'history', label: '复盘', icon: '▤' },
+  { key: 'audio', label: '音频', icon: '◌' },
+];
+
+function toScenario(record: ScenarioRecord): Scenario {
+  return {
+    correctionMode: record.correctionMode,
+    defaultPersonaId: record.defaultPersonaId,
+    focus: [record.difficulty, record.icon].filter(Boolean),
+    id: record.scenarioId,
+    level: record.difficulty,
+    minutes: record.maxDurationMinutes,
+    subtitle: record.description,
+    title: `${record.nameZh || record.name} ${record.name}`.trim(),
+  };
+}
+
 export function AppNavigator() {
   const [activeTab, setActiveTab] = useState<TabKey>('practice');
-  const [selectedScenario, setSelectedScenario] = useState('meeting');
+  const [lastSessionId, setLastSessionId] = useState<string | null>(null);
+  const [scenarioError, setScenarioError] = useState<string | null>(null);
+  const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [selectedScenario, setSelectedScenario] = useState<string | null>(null);
+  const accessToken = useAuthStore((state) => state.accessToken);
   const isAuthenticated = useAuthStore((state) => state.status === 'authenticated');
   const insets = useSafeAreaInsets();
   const currentScenario = useMemo(
-    () => scenarios.find((scenario) => scenario.id === selectedScenario) ?? scenarios[0],
-    [selectedScenario],
+    () => scenarios.find((scenario) => scenario.id === selectedScenario) ?? scenarios[0] ?? null,
+    [scenarios, selectedScenario],
   );
+
+  useEffect(() => {
+    if (!isAuthenticated || !accessToken) {
+      setScenarios([]);
+      setSelectedScenario(null);
+      return;
+    }
+
+    let cancelled = false;
+    setScenarioError(null);
+
+    void fetchScenarios(accessToken)
+      .then((records) => {
+        if (cancelled) {
+          return;
+        }
+
+        const nextScenarios = records.map(toScenario);
+        setScenarios(nextScenarios);
+        setSelectedScenario((current) => current ?? nextScenarios[0]?.id ?? null);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        setScenarioError(error instanceof Error ? error.message : '加载场景失败。');
+        setScenarios([]);
+        setSelectedScenario(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, isAuthenticated]);
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
@@ -33,16 +92,28 @@ export function AppNavigator() {
         <View style={styles.content}>
           {activeTab === 'practice' ? (
             <ScenarioSelectScreen
+              error={scenarioError}
+              scenarios={scenarios}
               selectedScenario={selectedScenario}
               onSelectScenario={setSelectedScenario}
-              onStart={() => setActiveTab('conversation')}
+              onStart={() => {
+                if (currentScenario) {
+                  setActiveTab('conversation');
+                }
+              }}
             />
           ) : null}
-          {activeTab === 'conversation' ? (
-            <PracticeScreen scenario={currentScenario} onEnd={() => setActiveTab('summary')} />
+          {activeTab === 'conversation' && currentScenario ? (
+            <PracticeScreen
+              scenario={currentScenario}
+              onEnd={(sessionId) => {
+                setLastSessionId(sessionId);
+                setActiveTab('summary');
+              }}
+            />
           ) : null}
           {activeTab === 'summary' ? (
-            <SessionSummaryScreen onPracticeAgain={() => setActiveTab('practice')} />
+            <SessionSummaryScreen sessionId={lastSessionId} onPracticeAgain={() => setActiveTab('practice')} />
           ) : null}
           {activeTab === 'history' ? <HistoryScreen /> : null}
           {activeTab === 'audio' ? <AudioSpikeScreen /> : null}

@@ -1,18 +1,21 @@
 import { useEffect, useRef } from 'react';
-import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { createPracticeSession, endPracticeSession } from '@/clients/practiceSessionClient';
+import { RealtimeClient } from '@/clients/realtimeClient';
 import { AppPalette } from '@/constants/appPalette';
+import { ApiRuntimeConfig } from '@/config/runtime';
 import { RealtimeControls } from '@/components/practice/RealtimeControls';
 import { SpeakingStatus } from '@/components/practice/SpeakingStatus';
 import { TranscriptPanel } from '@/components/practice/TranscriptPanel';
-import { mockRealtimeTimeline } from '@/data/practiceMock';
+import { useAuthStore } from '@/state/authStore';
 import { useSessionStore } from '@/state/sessionStore';
 import { Scenario } from '@/types/practice';
 import { PracticeSessionState } from '@/types/realtime';
 
 type PracticeScreenProps = {
   scenario: Scenario;
-  onEnd: () => void;
+  onEnd: (sessionId: string | null) => void;
 };
 
 const statusLabel: Record<PracticeSessionState, string> = {
@@ -35,18 +38,26 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
   const elapsedSec = useSessionStore((state) => state.elapsedSec);
   const hints = useSessionStore((state) => state.hints);
   const latencyMs = useSessionStore((state) => state.latencyMs);
+  const connectionStatus = useSessionStore((state) => state.connectionStatus);
   const partialTurn = useSessionStore((state) => state.partialTurn);
   const score = useSessionStore((state) => state.score);
   const sessionId = useSessionStore((state) => state.sessionId);
   const status = useSessionStore((state) => state.status);
   const turns = useSessionStore((state) => state.turns);
-  const timeoutRefs = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const accessToken = useAuthStore((state) => state.accessToken);
+  const activeSessionIdRef = useRef<string | null>(null);
+  const realtimeClientRef = useRef<RealtimeClient | null>(null);
+  const timerRefs = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const intervalRefs = useRef<ReturnType<typeof setInterval>[]>([]);
 
   useEffect(() => {
+    let cancelled = false;
+    activeSessionIdRef.current = null;
+
     dispatchRealtimeEvent({
       payload: {
         scenario,
-        sessionId: 'mock_session_001',
+        sessionId: `session_${Date.now()}`,
       },
       type: 'local.reset_session',
     });
@@ -56,40 +67,159 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
         type: 'local.tick',
       });
     }, 1000);
+    intervalRefs.current.push(elapsedTimer);
 
-    mockRealtimeTimeline.forEach((step) => {
-      const timeoutId = setTimeout(() => {
-        dispatchRealtimeEvent(step.event);
-      }, step.delayMs);
+    if (!accessToken) {
+      dispatchRealtimeEvent({
+        payload: {
+          recoverable: false,
+          code: 'missing_access_token',
+          message: '请先完成真实登录，再进入实时练习。',
+        },
+        serverSeq: 1,
+        sessionId: `session_${Date.now()}`,
+        type: 'error',
+      });
+      return () => {
+        cancelled = true;
+        intervalRefs.current.forEach(clearInterval);
+        intervalRefs.current = [];
+        timerRefs.current.forEach(clearTimeout);
+        timerRefs.current = [];
+        realtimeClientRef.current?.close();
+        realtimeClientRef.current = null;
+      };
+    }
 
-      timeoutRefs.current.push(timeoutId);
-    });
+    void (async () => {
+      try {
+        const session = await createPracticeSession(accessToken, {
+          correctionMode: scenario.correctionMode,
+          personaId: scenario.defaultPersonaId,
+          scenarioId: scenario.id,
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        activeSessionIdRef.current = session.sessionId;
+        dispatchRealtimeEvent({
+          payload: {
+            scenario,
+            sessionId: session.sessionId,
+          },
+          type: 'local.reset_session',
+        });
+
+        const client = new RealtimeClient({
+          onEvent: dispatchRealtimeEvent,
+          onStatusChange: (connectionStatus) => {
+            dispatchRealtimeEvent({
+              payload: {
+                status: connectionStatus,
+              },
+              type: 'local.connection_status',
+            });
+          },
+          sessionId: session.sessionId,
+          token: accessToken,
+        });
+
+        realtimeClientRef.current = client;
+        client.connect();
+
+        const pingTimer = setInterval(() => {
+          client.send({
+            clientSeq: Date.now(),
+            payload: {
+              clientTime: new Date().toISOString(),
+            },
+            sessionId: session.sessionId,
+            type: 'ping',
+          });
+        }, 8000);
+        intervalRefs.current.push(pingTimer);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        dispatchRealtimeEvent({
+          payload: {
+            recoverable: false,
+            code: 'practice_session_create_failed',
+            message: error instanceof Error ? error.message : '创建练习会话失败。',
+          },
+          serverSeq: 2,
+          sessionId: `session_${Date.now()}`,
+          type: 'error',
+        });
+      }
+    })();
 
     return () => {
-      clearInterval(elapsedTimer);
-      timeoutRefs.current.forEach(clearTimeout);
-      timeoutRefs.current = [];
+      cancelled = true;
+      intervalRefs.current.forEach(clearInterval);
+      intervalRefs.current = [];
+      timerRefs.current.forEach(clearTimeout);
+      timerRefs.current = [];
+      realtimeClientRef.current?.close();
+      realtimeClientRef.current = null;
     };
-  }, [dispatchRealtimeEvent, scenario]);
+  }, [accessToken, dispatchRealtimeEvent, scenario]);
 
   const handleInterrupt = () => {
-    timeoutRefs.current.forEach(clearTimeout);
-    timeoutRefs.current = [];
+    timerRefs.current.forEach(clearTimeout);
+    timerRefs.current = [];
+    const activeSessionId = activeSessionIdRef.current;
+    if (activeSessionId) {
+      realtimeClientRef.current?.send({
+        clientSeq: Date.now(),
+        payload: {
+          action: 'cancel_ai_speech',
+        },
+        sessionId: activeSessionId,
+        type: 'session_control',
+      });
+    }
     dispatchRealtimeEvent({
       type: 'local.cancel_ai_speech',
     });
   };
 
-  const handleEnd = () => {
-    timeoutRefs.current.forEach(clearTimeout);
-    timeoutRefs.current = [];
+  const handleEnd = async () => {
+    const activeSessionId = activeSessionIdRef.current;
+    timerRefs.current.forEach(clearTimeout);
+    timerRefs.current = [];
+    intervalRefs.current.forEach(clearInterval);
+    intervalRefs.current = [];
+    if (activeSessionId) {
+      realtimeClientRef.current?.send({
+        clientSeq: Date.now(),
+        payload: {
+          action: 'end',
+        },
+        sessionId: activeSessionId,
+        type: 'session_control',
+      });
+    }
+
+    if (accessToken && activeSessionId) {
+      try {
+        await endPracticeSession(accessToken, activeSessionId);
+      } catch {
+        // Keep the UI moving even if the closeout call fails.
+      }
+    }
+
     dispatchRealtimeEvent({
       payload: {
-        reason: 'user_tap_end',
+        reason: 'tap_stop',
         status: 'report_generating',
       },
       serverSeq: 999,
-      sessionId: sessionId ?? 'mock_session_001',
+      sessionId: activeSessionId ?? sessionId ?? '',
       type: 'session_state',
     });
     dispatchRealtimeEvent({
@@ -98,7 +228,8 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
       },
       type: 'local.audio_level',
     });
-    setTimeout(onEnd, 550);
+    realtimeClientRef.current?.close();
+    setTimeout(() => onEnd(activeSessionId), 550);
   };
 
   return (
@@ -108,7 +239,9 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
       <View style={styles.connectionCard}>
         <View>
           <Text style={styles.connectionTitle}>WebSocket 语音流</Text>
-          <Text style={styles.connectionSubtitle}>mock realtime timeline · {statusLabel[status]}</Text>
+          <Text style={styles.connectionSubtitle}>
+            {ApiRuntimeConfig.realtimeWsBaseUrl} · {statusLabel[status]} · {connectionStatus}
+          </Text>
         </View>
         <Text style={styles.latency}>{latencyMs}ms</Text>
       </View>

@@ -2,15 +2,21 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { AppPalette } from '@/constants/appPalette';
 
-export function SummaryCard() {
+type SummaryCardProps = {
+  score: number;
+  summary: string;
+  title: string;
+};
+
+export function SummaryCard({ score, summary, title }: SummaryCardProps) {
   return (
     <View style={styles.scoreHero}>
       <View style={styles.scoreOrb}>
-        <Text style={styles.scoreNumber}>81</Text>
+        <Text style={styles.scoreNumber}>{Math.round(score)}</Text>
       </View>
       <View style={styles.scoreCopy}>
-        <Text style={styles.scoreTitle}>会议表达更稳定</Text>
-        <Text style={styles.scoreText}>阻塞说明清晰，下一步计划表达可再加强。</Text>
+        <Text style={styles.scoreTitle}>{title}</Text>
+        <Text style={styles.scoreText}>{summary}</Text>
       </View>
     </View>
   );

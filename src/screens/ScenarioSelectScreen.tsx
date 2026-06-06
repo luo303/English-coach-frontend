@@ -3,20 +3,25 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppPalette } from '@/constants/appPalette';
 import { DifficultySelector } from '@/components/scenario/DifficultySelector';
 import { ScenarioCard } from '@/components/scenario/ScenarioCard';
-import { scenarios } from '@/data/practiceMock';
+import { Scenario } from '@/types/practice';
 
 type ScenarioSelectScreenProps = {
-  selectedScenario: string;
+  error: string | null;
+  scenarios: Scenario[];
+  selectedScenario: string | null;
   onSelectScenario: (id: string) => void;
   onStart: () => void;
 };
 
 export function ScenarioSelectScreen({
+  error,
+  scenarios,
   selectedScenario,
   onSelectScenario,
   onStart,
 }: ScenarioSelectScreenProps) {
-  const currentScenario = scenarios.find((scenario) => scenario.id === selectedScenario) ?? scenarios[0];
+  const currentScenario = scenarios.find((scenario) => scenario.id === selectedScenario) ?? scenarios[0] ?? null;
+  const canStart = Boolean(currentScenario);
 
   return (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -30,6 +35,9 @@ export function ScenarioSelectScreen({
 
       <DifficultySelector />
 
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {!error && scenarios.length === 0 ? <Text style={styles.emptyText}>正在从后端加载场景...</Text> : null}
+
       <View style={styles.scenarioList}>
         {scenarios.map((scenario) => (
           <ScenarioCard
@@ -41,8 +49,13 @@ export function ScenarioSelectScreen({
         ))}
       </View>
 
-      <Pressable accessibilityRole="button" onPress={onStart} style={styles.primaryButton}>
-        <Text style={styles.primaryButtonText}>开始{currentScenario.title}模拟</Text>
+      <Pressable
+        accessibilityRole="button"
+        disabled={!canStart}
+        onPress={onStart}
+        style={[styles.primaryButton, !canStart && styles.primaryButtonDisabled]}
+      >
+        <Text style={styles.primaryButtonText}>{currentScenario ? `开始${currentScenario.title}` : '等待场景加载'}</Text>
       </Pressable>
     </ScrollView>
   );
@@ -137,6 +150,18 @@ const styles = StyleSheet.create({
   scenarioList: {
     gap: 12,
   },
+  errorText: {
+    color: AppPalette.red,
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 12,
+  },
+  emptyText: {
+    color: AppPalette.muted,
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
   primaryButton: {
     alignItems: 'center',
     backgroundColor: AppPalette.blue,
@@ -148,6 +173,9 @@ const styles = StyleSheet.create({
     shadowOffset: { height: 14, width: 0 },
     shadowOpacity: 0.24,
     shadowRadius: 24,
+  },
+  primaryButtonDisabled: {
+    opacity: 0.5,
   },
   primaryButtonText: {
     color: '#FFFFFF',

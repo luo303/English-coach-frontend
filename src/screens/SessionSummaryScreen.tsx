@@ -1,26 +1,119 @@
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { fetchPracticeSession, fetchPracticeSessionTurns } from '@/clients/practiceSessionClient';
+import { fetchReport } from '@/clients/reportClient';
 import { AppPalette } from '@/constants/appPalette';
 import { AbilityRadar } from '@/components/feedback/AbilityRadar';
 import { SummaryCard } from '@/components/feedback/SummaryCard';
-import { summaryMetrics } from '@/data/practiceMock';
+import { useAuthStore } from '@/state/authStore';
+import { PracticeSessionRecord, PracticeSessionTurnRecord, ReportRecord } from '@/types/api';
+import { Metric } from '@/types/practice';
 
 type SessionSummaryScreenProps = {
+  sessionId: string | null;
   onPracticeAgain: () => void;
 };
 
-const kpis = [
-  { label: '平均延迟', value: '221ms' },
-  { label: '有效轮次', value: '10' },
-  { label: '追问完成', value: '4/5' },
-  { label: '复用表达', value: '7' },
-];
+function formatDuration(seconds: number) {
+  const minutes = Math.floor(seconds / 60)
+    .toString()
+    .padStart(2, '0');
+  const rest = Math.floor(seconds % 60)
+    .toString()
+    .padStart(2, '0');
+  return `${minutes}:${rest}`;
+}
 
-export function SessionSummaryScreen({ onPracticeAgain }: SessionSummaryScreenProps) {
+function reportMetrics(report: ReportRecord | null): Metric[] {
+  if (!report) {
+    return [];
+  }
+
+  return [
+    { label: '发音清晰度', value: Math.round(report.scores.pronunciation) },
+    { label: '语法准确度', value: Math.round(report.scores.grammar) },
+    { label: '场景完成度', value: Math.round(report.scores.scenarioCompletion) },
+    { label: '流利度', value: Math.round(report.scores.fluency) },
+  ];
+}
+
+export function SessionSummaryScreen({ onPracticeAgain, sessionId }: SessionSummaryScreenProps) {
+  const accessToken = useAuthStore((state) => state.accessToken);
+  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<ReportRecord | null>(null);
+  const [session, setSession] = useState<PracticeSessionRecord | null>(null);
+  const [turns, setTurns] = useState<PracticeSessionTurnRecord[]>([]);
+  const metrics = useMemo(() => reportMetrics(report), [report]);
+  const kpis = useMemo(() => {
+    return [
+      { label: '平均延迟', value: `${session?.networkLatencyMs ?? 0}ms` },
+      { label: '有效轮次', value: String(report?.turnCount ?? session?.turnCount ?? turns.length) },
+      { label: '练习时长', value: formatDuration(report?.durationSeconds ?? session?.durationSeconds ?? 0) },
+      { label: '问题数量', value: String(report?.issueCount ?? 0) },
+    ];
+  }, [report, session, turns.length]);
+  const nextSuggestion =
+    report?.recommendedSentences?.join(' / ') ||
+    report?.nextTopics?.map((topic) => `${topic.title}: ${topic.reason}`).join(' / ') ||
+    '暂无后端建议。';
+
+  useEffect(() => {
+    if (!accessToken || !sessionId) {
+      setError('暂无可查询的真实会话报告。');
+      setReport(null);
+      setSession(null);
+      setTurns([]);
+      return;
+    }
+
+    let cancelled = false;
+    setError(null);
+
+    void Promise.all([
+      fetchReport(accessToken, sessionId),
+      fetchPracticeSession(accessToken, sessionId),
+      fetchPracticeSessionTurns(accessToken, sessionId),
+    ])
+      .then(([nextReport, nextSession, nextTurns]) => {
+        if (cancelled) {
+          return;
+        }
+
+        setReport(nextReport);
+        setSession(nextSession);
+        setTurns(nextTurns);
+      })
+      .catch((nextError) => {
+        if (cancelled) {
+          return;
+        }
+
+        setError(nextError instanceof Error ? nextError.message : '加载报告失败。');
+        setReport(null);
+        setSession(null);
+        setTurns([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, sessionId]);
+
   return (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-      <ScreenTitle eyebrow="会议场景" title="能力报告" action="↗" />
-      <SummaryCard />
+      <ScreenTitle eyebrow={session?.scenarioId ?? '真实会话'} title="能力报告" action="↗" />
+
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {!error && !report ? <Text style={styles.emptyText}>正在从后端加载报告...</Text> : null}
+
+      {report ? (
+        <SummaryCard
+          score={report.overallScore}
+          summary={report.summary}
+          title={report.status === 'completed' ? '报告已完成' : '报告生成中'}
+        />
+      ) : null}
 
       <View style={styles.kpiGrid}>
         {kpis.map((item) => (
@@ -31,11 +124,11 @@ export function SessionSummaryScreen({ onPracticeAgain }: SessionSummaryScreenPr
         ))}
       </View>
 
-      <AbilityRadar metrics={summaryMetrics} />
+      <AbilityRadar metrics={metrics} />
 
       <View style={styles.nextCard}>
         <Text style={styles.nextTitle}>下一次建议</Text>
-        <Text style={styles.nextText}>重点练习 “To reduce the risk...” 和 “My next step is...” 两类推进句。</Text>
+        <Text style={styles.nextText}>{nextSuggestion}</Text>
       </View>
 
       <Pressable onPress={onPracticeAgain} style={styles.primaryButton}>
@@ -126,6 +219,18 @@ const styles = StyleSheet.create({
     color: AppPalette.ink,
     fontSize: 22,
     fontWeight: '900',
+  },
+  emptyText: {
+    color: AppPalette.muted,
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  errorText: {
+    color: AppPalette.red,
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 12,
   },
   nextCard: {
     backgroundColor: AppPalette.greenSoft,

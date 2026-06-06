@@ -55,24 +55,24 @@ export type ClientRealtimeEvent =
       type: 'recording_start';
       clientSeq: number;
       sessionId: string;
+      sentAt?: string;
       payload: {
-        format: 'pcm_s16le';
-        sampleRate: 16000;
-        channels: 1;
-        chunkMs: number;
+        pronunciationVisible: boolean;
+        grammarVisible: boolean;
       };
     }
   | {
       type: 'audio_chunk';
       clientSeq: number;
       sessionId: string;
+      sentAt?: string;
       payload: {
         turnClientId: string;
         seq: number;
-        format: 'pcm_s16le';
+        audioFormat: 'pcm_s16le';
         sampleRate: 16000;
         channels: 1;
-        durationMs: number;
+        isFinal: boolean;
         data: string;
       };
     }
@@ -80,24 +80,30 @@ export type ClientRealtimeEvent =
       type: 'user_turn_end';
       clientSeq: number;
       sessionId: string;
+      sentAt?: string;
       payload: {
         turnClientId: string;
-        reason: 'vad_silence' | 'tap_stop' | 'timeout';
-        durationMs: number;
+        transcript: string;
+        pronunciationVisible: boolean;
+        grammarVisible: boolean;
+        startMs: number;
+        endMs: number;
       };
     }
   | {
       type: 'session_control';
       clientSeq: number;
       sessionId: string;
+      sentAt?: string;
       payload: {
-        action: 'pause' | 'resume' | 'end' | 'cancel_ai_speech' | 'retry_last_turn';
+        action: 'pause' | 'resume' | 'end' | 'cancel_ai_speech';
       };
     }
   | {
       type: 'ping';
       clientSeq: number;
       sessionId: string;
+      sentAt?: string;
       payload: {
         clientTime: string;
       };
@@ -137,6 +143,19 @@ export type ServerRealtimeEvent =
       serverSeq: number;
       sessionId: string;
       payload: TranscriptTurn;
+    }
+  | {
+      type: 'audio_chunk_ack';
+      serverSeq: number;
+      sessionId: string;
+      payload: {
+        accepted: boolean;
+        chunkBytes: number;
+        finalChunk: boolean;
+        seq: number;
+        totalBytes: number;
+        turnClientId: string;
+      };
     }
   | {
       type: 'ai_audio_chunk';
@@ -192,6 +211,12 @@ export type LocalRealtimeEvent =
     }
   | {
       type: 'local.cancel_ai_speech';
+    }
+  | {
+      type: 'local.connection_status';
+      payload: {
+        status: RealtimeConnectionStatus;
+      };
     }
   | {
       type: 'local.tick';

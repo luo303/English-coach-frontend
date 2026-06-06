@@ -1,10 +1,67 @@
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { fetchPracticeSessions } from '@/clients/practiceSessionClient';
 import { AppPalette } from '@/constants/appPalette';
 import { ScoreTrend } from '@/components/feedback/ScoreTrend';
-import { historyRecords } from '@/data/practiceMock';
+import { useAuthStore } from '@/state/authStore';
+import { PracticeSessionRecord } from '@/types/api';
+import { HistoryRecord } from '@/types/practice';
+
+function formatDuration(seconds: number) {
+  const minutes = Math.floor(seconds / 60)
+    .toString()
+    .padStart(2, '0');
+  const rest = Math.floor(seconds % 60)
+    .toString()
+    .padStart(2, '0');
+  return `${minutes}:${rest}`;
+}
+
+function toHistoryRecord(session: PracticeSessionRecord): HistoryRecord {
+  return {
+    delta: session.status,
+    expression: session.turnCount,
+    score: Math.round(session.overallScore ?? 0),
+    time: formatDuration(session.durationSeconds),
+    title: session.scenarioId,
+  };
+}
 
 export function HistoryScreen() {
+  const accessToken = useAuthStore((state) => state.accessToken);
+  const [error, setError] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<PracticeSessionRecord[]>([]);
+  const records = useMemo(() => sessions.map(toHistoryRecord), [sessions]);
+
+  useEffect(() => {
+    if (!accessToken) {
+      setError('请先登录后查看历史会话。');
+      setSessions([]);
+      return;
+    }
+
+    let cancelled = false;
+    setError(null);
+
+    void fetchPracticeSessions(accessToken)
+      .then((response) => {
+        if (!cancelled) {
+          setSessions(response.page.content);
+        }
+      })
+      .catch((nextError) => {
+        if (!cancelled) {
+          setError(nextError instanceof Error ? nextError.message : '加载历史会话失败。');
+          setSessions([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken]);
+
   return (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
       <ScreenTitle eyebrow="训练资产" title="历史复盘" action="≡" />
@@ -16,7 +73,10 @@ export function HistoryScreen() {
         </Pressable>
       </View>
 
-      {historyRecords.map((record) => (
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {!error && records.length === 0 ? <Text style={styles.emptyText}>暂无后端历史会话。</Text> : null}
+
+      {records.map((record) => (
         <ScoreTrend key={record.title} record={record} />
       ))}
     </ScrollView>
@@ -110,5 +170,16 @@ const styles = StyleSheet.create({
     color: AppPalette.ink,
     fontSize: 16,
     fontWeight: '900',
+  },
+  emptyText: {
+    color: AppPalette.muted,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  errorText: {
+    color: AppPalette.red,
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 12,
   },
 });
