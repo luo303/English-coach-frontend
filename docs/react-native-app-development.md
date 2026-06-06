@@ -13,7 +13,7 @@ App 端需要支持：
 - 课后总结
 - 口语能力提升的可量化反馈
 
-发音评测、语法纠错、课后总结、用户数据、课程数据等能力由其他业务后端提供，本文档只定义前端需要承载的页面、状态、数据结构和接口适配方式，不展开其他后端实现。
+发音评测、语法纠错、课后总结、用户数据、课程数据等能力由其他业务后端提供。当前阶段以前端 mock 为主，本文档只定义当前页面需要承载的 UI、状态、数据结构和后续接口适配方式，不展开其他后端实现。
 
 ## 2. 前端技术栈
 
@@ -21,18 +21,18 @@ App 端需要支持：
 | --- | --- |
 | 移动端框架 | React Native |
 | 开发语言 | TypeScript |
-| 工程方案 | React Native CLI / Expo Dev Client |
-| 页面导航 | React Navigation |
-| 状态管理 | Zustand / React State |
-| 实时通信 | WebSocket |
-| HTTP 请求 | fetch / axios |
-| 麦克风权限 | react-native-permissions |
-| 实时音频采集 | react-native-audio-api / react-native-live-audio-stream |
-| PCM 音频播放 | Native PCM Player |
-| iOS 音频底层 | AVAudioSession / AVAudioEngine / AVAudioPlayerNode |
-| Android 音频底层 | AudioRecord / AudioTrack |
+| 工程方案 | Expo SDK 54 |
+| 页面导航 | Expo Router + 当前 `AppNavigator` |
+| 状态管理 | React State |
+| 实时通信 | 当前阶段 mock，后续预留 WebSocket client interface |
+| HTTP 请求 | 当前阶段 mock，后续预留 fetch client interface |
+| 麦克风权限 | 当前阶段不申请真实权限 |
+| 实时音频采集 | 当前阶段不采集真实音频 |
+| PCM 音频播放 | 当前阶段不播放真实音频 |
+| iOS 音频底层 | 后续对接时再选型 |
+| Android 音频底层 | 后续对接时再选型 |
 | 样式方案 | StyleSheet |
-| 本地缓存 | AsyncStorage |
+| 本地缓存 | 当前阶段暂不接入 |
 
 ## 3. 前端功能范围
 
@@ -41,8 +41,8 @@ App 端需要支持：
 - 练习场景选择
 - 难度、口音、练习目标选择
 - 实时语音会话 UI
-- 麦克风采集和音频上传
-- AI 语音播放
+- 实时语音会话 UI mock
+- mock 音量和状态展示
 - 实时字幕展示
 - 会话状态展示
 - 打断、结束、重试等交互
@@ -50,7 +50,7 @@ App 端需要支持：
 - 语法 / 表达纠错结果展示
 - 课后总结展示
 - 能力指标可视化
-- 多后端接口适配
+- 后续多后端接口适配预留
 
 ### 不负责
 
@@ -61,6 +61,7 @@ App 端需要支持：
 - 用户体系后端
 - 课程体系后端
 - 订单、支付、运营后台等业务后端
+- 当前阶段真实麦克风采集、真实音频播放、真实 REST 和真实 WebSocket
 
 ## 4. 后端依赖边界
 
@@ -68,11 +69,11 @@ App 端需要支持：
 
 | 能力 | 前端对接方式 | 说明 |
 | --- | --- | --- |
-| 实时语音通话 | WebSocket | 对接 `realtime-server-development.md` |
-| 发音评测 | HTTP API / 业务 SDK | 由其他后端提供 |
-| 语法 / 表达纠错 | HTTP API | 由其他后端提供 |
-| 课后总结 | HTTP API | 由其他后端提供 |
-| 用户与练习记录 | HTTP API | 由其他后端提供 |
+| 实时语音通话 | 后续 WebSocket client interface | 当前阶段使用 mock |
+| 发音评测 | 后续 HTTP API / 业务 SDK | 当前阶段使用 mock |
+| 语法 / 表达纠错 | 后续 HTTP API | 当前阶段使用 mock |
+| 课后总结 | 后续 HTTP API | 当前阶段使用 mock |
+| 用户与练习记录 | 后续 HTTP API | 当前阶段使用 mock |
 
 前端需要通过独立 client 层隔离这些能力，避免页面直接耦合具体后端实现。
 
@@ -81,6 +82,9 @@ App 端需要支持：
 ```text
 src/
   app/
+    _layout.tsx
+    index.tsx
+  navigation/
     AppNavigator.tsx
   screens/
     ScenarioSelectScreen.tsx
@@ -103,24 +107,15 @@ src/
       SummaryCard.tsx
       AbilityRadar.tsx
       ScoreTrend.tsx
-  audio/
-    RealtimeAudioRecorder.ts
-    RealtimeAudioPlayer.ts
-  api/
+  clients/
     realtimeClient.ts
-    pronunciationClient.ts
-    correctionClient.ts
-    summaryClient.ts
-    userClient.ts
-  store/
+    reportClient.ts
+    historyClient.ts
+  state/
     practiceStore.ts
     sessionStore.ts
-    userStore.ts
   types/
-    realtime.ts
-    scenario.ts
-    feedback.ts
-    summary.ts
+    practice.ts
 ```
 
 ## 6. 页面设计
@@ -185,17 +180,13 @@ src/
 
 ## 7. 实时通话链路
 
-实时通话只对接实时通话后端。
+当前阶段实时通话页面只展示 mock 状态，不连接实时通话后端。后续对接时通过 client interface 替换 mock。
 
 ```text
 PracticeScreen
-  -> RealtimeAudioRecorder
-  -> realtimeClient WebSocket
-  -> realtime-server
-  -> AI 实时对话服务
-  -> realtime-server
-  -> realtimeClient
-  -> TranscriptPanel / RealtimeAudioPlayer
+  -> mock realtime state
+  -> TranscriptPanel / SpeakingStatus / RealtimeControls
+  -> SessionSummaryScreen
 ```
 
 ## 8. 实时 WebSocket 事件
@@ -351,16 +342,10 @@ export type PracticeSessionState =
 用户选择场景
   -> 选择难度、口音和练习目标
   -> 点击开始
-  -> 创建实时 WebSocket
-  -> 请求麦克风权限
-  -> 启动音频采集
-  -> 收到 session.ready
-  -> 开始发送 audio.input
-  -> 进行自然语音对话
+  -> 进入 mock 实时对话
+  -> 展示 mock 连接、字幕、音量和 AI 状态
   -> 用户点击结束
-  -> 关闭实时通话
-  -> 提交会话文本 / 音频引用 / 元数据给业务后端
-  -> 获取发音评测、纠错和课后总结
+  -> 使用 mock 数据生成课后总结
   -> 展示课后总结页
 ```
 
@@ -446,18 +431,15 @@ export type SessionSummary = {
 
 ## 16. 反馈能力接口适配
 
-发音评测、语法 / 表达纠错、课后总结由其他业务后端提供。前端需要预留独立 client 层，并在实时通话结束后统一拉取或提交生成。
+发音评测、语法 / 表达纠错、课后总结由其他业务后端提供。当前阶段由 mock 数据驱动；后续需要预留独立 client 层，并在实时通话结束后统一拉取或提交生成。
 
 ### 调用时机
 
 ```text
-实时通话结束
+mock 实时通话结束
   -> 整理本次会话 transcript
   -> 整理 sessionId、scenarioId、duration、difficulty、accent
-  -> 调用业务后端生成课后反馈
-  -> 获取发音评测
-  -> 获取语法 / 表达纠错
-  -> 获取课后总结
+  -> 从 mock implementation 获取发音评测、语法纠错和课后总结
   -> 进入 SessionSummaryScreen
 ```
 
@@ -572,36 +554,27 @@ export type FeedbackLoadingState =
 ## 18. 环境配置
 
 ```env
-REALTIME_WS_URL=ws://your-realtime-server/ws/practice
-BUSINESS_API_BASE_URL=https://your-business-api
+# 当前阶段不需要真实环境变量。
+# 后续对接时再配置实时服务和业务接口环境变量。
 ```
 
-开发环境地址参考：
-
-| 场景 | 地址 |
-| --- | --- |
-| iOS 模拟器访问本机实时服务 | `ws://localhost:3001/ws/practice` |
-| Android 模拟器访问本机实时服务 | `ws://10.0.2.2:3001/ws/practice` |
-| 真机访问本机实时服务 | `ws://局域网IP:3001/ws/practice` |
-| 线上实时服务 | `wss://your-domain/ws/practice` |
+后续接入真实服务时，再补充开发、测试和生产环境地址。
 
 ## 19. 前端验收标准
 
 - 可以选择面试、点餐、会议等练习场景
 - 可以选择难度、口音和练习目标
-- 可以成功连接实时通话后端
-- 可以成功发送 `session.start`
-- 可以收到 `session.ready`
-- 可以采集并发送 `PCM16 / 16kHz / mono` 音频
-- 连续采集 5 分钟无明显丢帧、卡死或内存上涨
+- 可以进入 mock 实时对话页面
+- 可以展示 mock 连接状态
+- 不申请真实麦克风权限
+- 不连接真实 WebSocket
 - 可以展示用户实时字幕
 - 可以展示 AI 实时字幕
-- 可以播放 AI 返回的 PCM 音频
-- AI 音频片段连续播放无明显爆音、重叠或长间隔
-- 可以正常打断 AI 语音
+- 可以展示 mock AI 说话状态
+- 可以通过 mock 控制结束会话
 - 可以正常结束会话并释放资源
 - 可以展示发音评测结果
 - 可以展示语法 / 表达纠错结果
 - 可以展示课后总结
 - 可以展示口语能力分项评分
-- iOS 真机和 Android 真机都可以完成完整练习流程
+- `pnpm lint` 和 `pnpm exec tsc --noEmit` 通过
