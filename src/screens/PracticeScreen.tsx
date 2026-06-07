@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { AudioApiRealtimePlayer } from '@/audio/player';
+import { AudioApiRealtimeRecorder } from '@/audio/recorder';
 import { createPracticeSession, endPracticeSession } from '@/clients/practiceSessionClient';
 import { RealtimeClient } from '@/clients/realtimeClient';
 import { AppPalette } from '@/constants/appPalette';
@@ -12,6 +14,7 @@ import { useAuthStore } from '@/state/authStore';
 import { useSessionStore } from '@/state/sessionStore';
 import { Scenario } from '@/types/practice';
 import { PracticeSessionState } from '@/types/realtime';
+import { debugLog } from '@/utils/debugLog';
 
 type PracticeScreenProps = {
   scenario: Scenario;
@@ -40,26 +43,103 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
   const latencyMs = useSessionStore((state) => state.latencyMs);
   const connectionStatus = useSessionStore((state) => state.connectionStatus);
   const partialTurn = useSessionStore((state) => state.partialTurn);
+  const playbackQueue = useSessionStore((state) => state.playbackQueue);
   const score = useSessionStore((state) => state.score);
   const sessionId = useSessionStore((state) => state.sessionId);
   const status = useSessionStore((state) => state.status);
   const turns = useSessionStore((state) => state.turns);
   const accessToken = useAuthStore((state) => state.accessToken);
   const activeSessionIdRef = useRef<string | null>(null);
+  const audioSeqRef = useRef(0);
+  const playedAudioIdsRef = useRef<Set<string>>(new Set());
+  const playerRef = useRef<AudioApiRealtimePlayer | null>(null);
+  const recorderRef = useRef<AudioApiRealtimeRecorder | null>(null);
   const realtimeClientRef = useRef<RealtimeClient | null>(null);
+  const statusRef = useRef<PracticeSessionState>(status);
   const timerRefs = useRef<ReturnType<typeof setTimeout>[]>([]);
   const intervalRefs = useRef<ReturnType<typeof setInterval>[]>([]);
+  const lastAudioFrameLogAtRef = useRef(0);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  useEffect(() => {
+    debugLog('UI', 'transcript state', {
+      partialTurn: partialTurn
+        ? {
+            isFinal: partialTurn.isFinal,
+            speaker: partialTurn.speaker,
+            text: partialTurn.text,
+            textLength: partialTurn.text.length,
+            turnId: partialTurn.turnId,
+          }
+        : null,
+      sessionId,
+      status,
+      turnCount: turns.length,
+      turns: turns.slice(-3).map((turn) => ({
+        isFinal: turn.isFinal,
+        speaker: turn.speaker,
+        text: turn.text,
+        textLength: turn.text.length,
+        turnId: turn.turnId,
+      })),
+    });
+  }, [partialTurn, sessionId, status, turns]);
+
+  useEffect(() => {
+    if (!playerRef.current) {
+      playerRef.current = new AudioApiRealtimePlayer();
+    }
+
+    for (const chunk of playbackQueue) {
+      if (playedAudioIdsRef.current.has(chunk.id) || !chunk.audioBase64 || chunk.format !== 'pcm16') {
+        continue;
+      }
+
+      playedAudioIdsRef.current.add(chunk.id);
+      debugLog('AUDIO', 'enqueue playback chunk', {
+        audioBase64Length: chunk.audioBase64.length,
+        id: chunk.id,
+        sampleRate: chunk.sampleRate,
+        sessionId,
+        turnId: chunk.turnId,
+      });
+      void playerRef.current.enqueuePcm16(chunk.audioBase64, chunk.sampleRate).catch((error) => {
+        dispatchRealtimeEvent({
+          payload: {
+            code: 'audio_playback_failed',
+            message: error instanceof Error ? error.message : '播放 AI 音频失败。',
+            recoverable: true,
+          },
+          type: 'local.error',
+        });
+        debugLog('AUDIO', 'playback failed', {
+          message: error instanceof Error ? error.message : String(error),
+          sessionId: sessionId ?? activeSessionIdRef.current,
+        });
+      });
+    }
+  }, [dispatchRealtimeEvent, playbackQueue, sessionId]);
 
   useEffect(() => {
     let cancelled = false;
     activeSessionIdRef.current = null;
+    audioSeqRef.current = 0;
+    lastAudioFrameLogAtRef.current = 0;
+    playedAudioIdsRef.current.clear();
+    debugLog('PRACTICE', 'prepare session', {
+      correctionMode: scenario.correctionMode,
+      personaId: scenario.defaultPersonaId,
+      scenarioId: scenario.id,
+    });
 
     dispatchRealtimeEvent({
       payload: {
         scenario,
-        sessionId: `session_${Date.now()}`,
       },
-      type: 'local.reset_session',
+      type: 'local.prepare_session',
     });
 
     const elapsedTimer = setInterval(() => {
@@ -70,15 +150,14 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
     intervalRefs.current.push(elapsedTimer);
 
     if (!accessToken) {
+      debugLog('PRACTICE', 'missing access token');
       dispatchRealtimeEvent({
         payload: {
           recoverable: false,
           code: 'missing_access_token',
           message: '请先完成真实登录，再进入实时练习。',
         },
-        serverSeq: 1,
-        sessionId: `session_${Date.now()}`,
-        type: 'error',
+        type: 'local.error',
       });
       return () => {
         cancelled = true;
@@ -86,6 +165,10 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
         intervalRefs.current = [];
         timerRefs.current.forEach(clearTimeout);
         timerRefs.current = [];
+        void recorderRef.current?.stop();
+        recorderRef.current = null;
+        void playerRef.current?.close();
+        playerRef.current = null;
         realtimeClientRef.current?.close();
         realtimeClientRef.current = null;
       };
@@ -93,8 +176,13 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
 
     void (async () => {
       try {
+        debugLog('PRACTICE', 'create session start', {
+          correctionMode: 'realtime',
+          personaId: scenario.defaultPersonaId,
+          scenarioId: scenario.id,
+        });
         const session = await createPracticeSession(accessToken, {
-          correctionMode: scenario.correctionMode,
+          correctionMode: 'realtime',
           personaId: scenario.defaultPersonaId,
           scenarioId: scenario.id,
         });
@@ -104,6 +192,11 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
         }
 
         activeSessionIdRef.current = session.sessionId;
+        debugLog('PRACTICE', 'create session success', {
+          reportStatus: session.reportStatus,
+          sessionId: session.sessionId,
+          status: session.status,
+        });
         dispatchRealtimeEvent({
           payload: {
             scenario,
@@ -115,12 +208,87 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
         const client = new RealtimeClient({
           onEvent: dispatchRealtimeEvent,
           onStatusChange: (connectionStatus) => {
+            debugLog('PRACTICE', 'connection status', {
+              connectionStatus,
+              sessionId: session.sessionId,
+            });
             dispatchRealtimeEvent({
               payload: {
                 status: connectionStatus,
               },
               type: 'local.connection_status',
             });
+
+            if (connectionStatus === 'connected' && !recorderRef.current) {
+              const recorder = new AudioApiRealtimeRecorder();
+              recorderRef.current = recorder;
+              debugLog('AUDIO', 'recorder start requested', {
+                sessionId: session.sessionId,
+              });
+              void recorder.start((frame) => {
+                const activeSessionId = activeSessionIdRef.current;
+
+                dispatchRealtimeEvent({
+                  payload: {
+                    level: frame.level,
+                  },
+                  type: 'local.audio_level',
+                });
+
+                if (!activeSessionId) {
+                  return;
+                }
+
+                if (statusRef.current === 'assistant_speaking') {
+                  const now = Date.now();
+                  if (now - lastAudioFrameLogAtRef.current > 2000) {
+                    lastAudioFrameLogAtRef.current = now;
+                    debugLog('AUDIO', 'skip mic frame while assistant speaking', {
+                      level: frame.level,
+                      sampleRate: frame.sampleRate,
+                      sessionId: activeSessionId,
+                    });
+                  }
+                  return;
+                }
+
+                audioSeqRef.current += 1;
+                const now = Date.now();
+                if (now - lastAudioFrameLogAtRef.current > 2000) {
+                  lastAudioFrameLogAtRef.current = now;
+                  debugLog('AUDIO', 'capturing pcm frames', {
+                    audioBase64Length: frame.audioBase64.length,
+                    level: frame.level,
+                    sampleRate: frame.sampleRate,
+                    seq: audioSeqRef.current,
+                    sessionId: activeSessionId,
+                  });
+                }
+                realtimeClientRef.current?.send({
+                  payload: {
+                    data: frame.audioBase64,
+                    format: 'pcm16',
+                    sampleRate: 16000,
+                    turnClientId: `${activeSessionId}-${audioSeqRef.current}`,
+                  },
+                  type: 'audio_chunk',
+                });
+              }).catch((error) => {
+                recorderRef.current = null;
+                debugLog('AUDIO', 'recorder start failed', {
+                  message: error instanceof Error ? error.message : String(error),
+                  sessionId: session.sessionId,
+                });
+                dispatchRealtimeEvent({
+                  payload: {
+                    code: 'microphone_start_failed',
+                    message: error instanceof Error ? error.message : '无法启动麦克风。',
+                    recoverable: false,
+                  },
+                  type: 'local.error',
+                });
+              });
+            }
           },
           sessionId: session.sessionId,
           token: accessToken,
@@ -131,11 +299,9 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
 
         const pingTimer = setInterval(() => {
           client.send({
-            clientSeq: Date.now(),
             payload: {
               clientTime: new Date().toISOString(),
             },
-            sessionId: session.sessionId,
             type: 'ping',
           });
         }, 8000);
@@ -145,6 +311,9 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
           return;
         }
 
+        debugLog('PRACTICE', 'create session failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
         dispatchRealtimeEvent({
           payload: {
             recoverable: false,
@@ -164,6 +333,10 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
       intervalRefs.current = [];
       timerRefs.current.forEach(clearTimeout);
       timerRefs.current = [];
+      void recorderRef.current?.stop();
+      recorderRef.current = null;
+      void playerRef.current?.close();
+      playerRef.current = null;
       realtimeClientRef.current?.close();
       realtimeClientRef.current = null;
     };
@@ -174,15 +347,11 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
     timerRefs.current = [];
     const activeSessionId = activeSessionIdRef.current;
     if (activeSessionId) {
-      realtimeClientRef.current?.send({
-        clientSeq: Date.now(),
-        payload: {
-          action: 'cancel_ai_speech',
-        },
+      debugLog('PRACTICE', 'interrupt requested', {
         sessionId: activeSessionId,
-        type: 'session_control',
       });
     }
+    playerRef.current?.clearQueue();
     dispatchRealtimeEvent({
       type: 'local.cancel_ai_speech',
     });
@@ -190,25 +359,41 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
 
   const handleEnd = async () => {
     const activeSessionId = activeSessionIdRef.current;
+    debugLog('PRACTICE', 'end requested', {
+      sessionId: activeSessionId,
+    });
     timerRefs.current.forEach(clearTimeout);
     timerRefs.current = [];
     intervalRefs.current.forEach(clearInterval);
     intervalRefs.current = [];
+    void recorderRef.current?.stop();
+    recorderRef.current = null;
+    playerRef.current?.clearQueue();
     if (activeSessionId) {
+      debugLog('PRACTICE', 'send ws end control', {
+        sessionId: activeSessionId,
+      });
       realtimeClientRef.current?.send({
-        clientSeq: Date.now(),
         payload: {
           action: 'end',
         },
-        sessionId: activeSessionId,
         type: 'session_control',
       });
     }
 
     if (accessToken && activeSessionId) {
       try {
+        debugLog('PRACTICE', 'rest end session start', {
+          sessionId: activeSessionId,
+        });
         await endPracticeSession(accessToken, activeSessionId);
+        debugLog('PRACTICE', 'rest end session success', {
+          sessionId: activeSessionId,
+        });
       } catch {
+        debugLog('PRACTICE', 'rest end session failed', {
+          sessionId: activeSessionId,
+        });
         // Keep the UI moving even if the closeout call fails.
       }
     }

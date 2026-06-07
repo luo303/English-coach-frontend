@@ -8,19 +8,19 @@ import {
 } from '@/types/realtime';
 
 export const initialRealtimeScore: RealtimeScoreSnapshot = {
-  fluency: 80,
-  grammar: 78,
-  overall: 82,
-  pronunciation: 84,
+  fluency: 0,
+  grammar: 0,
+  overall: 0,
+  pronunciation: 0,
 };
 
 export const initialSessionRealtimeState: SessionRealtimeState = {
-  audioLevel: 8,
+  audioLevel: 0,
   clientSeq: 0,
   connectionStatus: 'disconnected',
   elapsedSec: 0,
   hints: [],
-  latencyMs: 238,
+  latencyMs: 0,
   latestServerSeq: 0,
   partialTurn: null,
   playbackQueue: [],
@@ -58,6 +58,14 @@ export function reduceRealtimeEvent(
   const latestServerSeq = 'serverSeq' in event ? event.serverSeq : state.latestServerSeq;
 
   switch (event.type) {
+    case 'local.prepare_session':
+      return {
+        ...initialSessionRealtimeState,
+        connectionStatus: 'connecting',
+        scenario: event.payload.scenario,
+        status: 'connecting',
+      };
+
     case 'local.reset_session':
       return {
         ...initialSessionRealtimeState,
@@ -94,6 +102,20 @@ export function reduceRealtimeEvent(
       return {
         ...state,
         connectionStatus: event.payload.status,
+      };
+
+    case 'local.error':
+      return {
+        ...state,
+        connectionStatus: event.payload.recoverable ? state.connectionStatus : 'closed',
+        hints: prependHint(state.hints, {
+          id: `error_${event.payload.code}`,
+          message: event.payload.message,
+          severity: event.payload.recoverable ? 'medium' : 'high',
+          title: event.payload.recoverable ? '实时链路提示' : '实时链路异常',
+          type: 'system',
+        }),
+        status: event.payload.recoverable ? state.status : 'error',
       };
 
     case 'local.tick':
@@ -155,7 +177,7 @@ export function reduceRealtimeEvent(
         clientSeq: state.clientSeq + 1,
         latestServerSeq,
         playbackQueue: appendAudioChunk(state.playbackQueue, event.payload),
-        status: 'assistant_speaking',
+        status: event.payload.isFinal ? 'listening' : 'assistant_speaking',
       };
 
     case 'audio_chunk_ack':

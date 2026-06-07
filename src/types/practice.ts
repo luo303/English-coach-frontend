@@ -1,7 +1,7 @@
 export type TabKey = 'practice' | 'conversation' | 'summary' | 'history' | 'audio';
 
 export type Scenario = {
-  correctionMode: 'immediate' | 'light_live_correction' | 'strict_live_correction' | 'report_only';
+  correctionMode: string;
   defaultPersonaId: string;
   id: string;
   title: string;

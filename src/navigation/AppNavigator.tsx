@@ -13,6 +13,7 @@ import { SessionSummaryScreen } from '@/screens/SessionSummaryScreen';
 import { useAuthStore } from '@/state/authStore';
 import { ScenarioRecord } from '@/types/api';
 import { Scenario, TabItem, TabKey } from '@/types/practice';
+import { debugLog } from '@/utils/debugLog';
 
 const TAB_BAR_HEIGHT = 72;
 
@@ -58,6 +59,9 @@ export function AppNavigator() {
 
     let cancelled = false;
     setScenarioError(null);
+    debugLog('SCENARIO', 'load scenarios start', {
+      hasToken: Boolean(accessToken),
+    });
 
     void fetchScenarios(accessToken)
       .then((records) => {
@@ -66,6 +70,10 @@ export function AppNavigator() {
         }
 
         const nextScenarios = records.map(toScenario);
+        debugLog('SCENARIO', 'load scenarios success', {
+          count: nextScenarios.length,
+          selectedScenarioId: nextScenarios[0]?.id ?? null,
+        });
         setScenarios(nextScenarios);
         setSelectedScenario((current) => current ?? nextScenarios[0]?.id ?? null);
       })
@@ -75,6 +83,9 @@ export function AppNavigator() {
         }
 
         setScenarioError(error instanceof Error ? error.message : '加载场景失败。');
+        debugLog('SCENARIO', 'load scenarios failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
         setScenarios([]);
         setSelectedScenario(null);
       });

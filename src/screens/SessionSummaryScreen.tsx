@@ -9,6 +9,7 @@ import { SummaryCard } from '@/components/feedback/SummaryCard';
 import { useAuthStore } from '@/state/authStore';
 import { PracticeSessionRecord, PracticeSessionTurnRecord, ReportRecord } from '@/types/api';
 import { Metric } from '@/types/practice';
+import { debugLog } from '@/utils/debugLog';
 
 type SessionSummaryScreenProps = {
   sessionId: string | null;
@@ -33,7 +34,7 @@ function reportMetrics(report: ReportRecord | null): Metric[] {
   return [
     { label: '发音清晰度', value: Math.round(report.scores.pronunciation) },
     { label: '语法准确度', value: Math.round(report.scores.grammar) },
-    { label: '场景完成度', value: Math.round(report.scores.scenarioCompletion) },
+    { label: '词汇掌握度', value: Math.round(report.scores.vocabulary) },
     { label: '流利度', value: Math.round(report.scores.fluency) },
   ];
 }
@@ -50,12 +51,12 @@ export function SessionSummaryScreen({ onPracticeAgain, sessionId }: SessionSumm
       { label: '平均延迟', value: `${session?.networkLatencyMs ?? 0}ms` },
       { label: '有效轮次', value: String(report?.turnCount ?? session?.turnCount ?? turns.length) },
       { label: '练习时长', value: formatDuration(report?.durationSeconds ?? session?.durationSeconds ?? 0) },
-      { label: '问题数量', value: String(report?.issueCount ?? 0) },
+      { label: '问题数量', value: String(report?.mistakes?.length ?? 0) },
     ];
   }, [report, session, turns.length]);
   const nextSuggestion =
-    report?.recommendedSentences?.join(' / ') ||
-    report?.nextTopics?.map((topic) => `${topic.title}: ${topic.reason}`).join(' / ') ||
+    report?.suggestions?.join(' / ') ||
+    report?.mistakes?.map((mistake) => `${mistake.correction}: ${mistake.explanation}`).join(' / ') ||
     '暂无后端建议。';
 
   useEffect(() => {
@@ -69,6 +70,9 @@ export function SessionSummaryScreen({ onPracticeAgain, sessionId }: SessionSumm
 
     let cancelled = false;
     setError(null);
+    debugLog('REPORT', 'load report bundle start', {
+      sessionId,
+    });
 
     void Promise.all([
       fetchReport(accessToken, sessionId),
@@ -83,12 +87,22 @@ export function SessionSummaryScreen({ onPracticeAgain, sessionId }: SessionSumm
         setReport(nextReport);
         setSession(nextSession);
         setTurns(nextTurns);
+        debugLog('REPORT', 'load report bundle success', {
+          mistakeCount: nextReport.mistakes?.length ?? 0,
+          score: nextReport.overallScore,
+          sessionId,
+          turnCount: nextTurns.length,
+        });
       })
       .catch((nextError) => {
         if (cancelled) {
           return;
         }
 
+        debugLog('REPORT', 'load report bundle failed', {
+          message: nextError instanceof Error ? nextError.message : String(nextError),
+          sessionId,
+        });
         setError(nextError instanceof Error ? nextError.message : '加载报告失败。');
         setReport(null);
         setSession(null);
@@ -110,8 +124,8 @@ export function SessionSummaryScreen({ onPracticeAgain, sessionId }: SessionSumm
       {report ? (
         <SummaryCard
           score={report.overallScore}
-          summary={report.summary}
-          title={report.status === 'completed' ? '报告已完成' : '报告生成中'}
+          summary={report.suggestions?.join(' / ') || `${report.scenarioName} 完成 ${report.turnCount} 轮练习。`}
+          title={report.scenarioName}
         />
       ) : null}
 
@@ -132,7 +146,7 @@ export function SessionSummaryScreen({ onPracticeAgain, sessionId }: SessionSumm
       </View>
 
       <Pressable onPress={onPracticeAgain} style={styles.primaryButton}>
-        <Text style={styles.primaryButtonText}>复练会议场景</Text>
+        <Text style={styles.primaryButtonText}>重新练习</Text>
       </Pressable>
     </ScrollView>
   );

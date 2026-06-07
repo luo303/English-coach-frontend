@@ -1,150 +1,144 @@
-export type ApiTimestamp = {
-  nanos: number;
-  seconds: number;
-};
-
 export type ApiResponse<T> = {
   code: number;
   data: T;
-  info: string;
-  requestId: string;
+  info?: string;
+  requestId?: string;
 };
 
+export type IsoTimestamp = string;
+
 export type ApiUser = {
-  createdAt: ApiTimestamp;
-  level: string;
-  loginType: 'anonymous';
+  avatar: string | null;
   nickname: string;
-  updatedAt: ApiTimestamp;
   userId: string;
 };
 
 export type LoginResponse = {
   accessToken: string;
-  expiresAt: ApiTimestamp;
+  expiresAt: IsoTimestamp;
   tokenType: 'Bearer';
   user: ApiUser;
 };
 
+export type PracticeSessionMode = 'realtime';
+
 export type CreatePracticeSessionRequest = {
-  correctionMode?: 'immediate' | 'light_live_correction' | 'strict_live_correction' | 'report_only';
+  correctionMode: 'realtime';
   personaId: string;
   scenarioId: string;
 };
 
 export type PersonaRecord = {
-  personaId: string;
+  avatar?: string | null;
+  description?: string;
   name: string;
   nameZh: string;
-  rolePrompt: string;
-  replyStyle: string;
-  maxReplyWords: number;
+  personaId: string;
 };
 
 export type ScenarioRecord = {
-  scenarioId: string;
+  correctionMode: PracticeSessionMode;
+  defaultPersonaId: string;
+  description: string;
+  difficulty: 'beginner' | 'intermediate' | 'advanced' | string;
+  icon: string;
+  maxDurationMinutes: number;
+  maxReplyWords: number;
   name: string;
   nameZh: string;
-  difficulty: 'easy' | 'medium' | 'hard' | string;
-  icon: string;
-  description: string;
-  defaultPersonaId: string;
-  maxReplyWords: number;
-  maxDurationMinutes: number;
-  correctionMode: PracticeSessionMode;
+  scenarioId: string;
 };
 
 export type ScenarioDetailRecord = ScenarioRecord & {
-  targetSkills: string[];
-  defaultPersona: PersonaRecord;
-  openingPrompt: string;
+  personas: PersonaRecord[];
 };
 
-export type PracticeSessionStatus = 'active' | 'completed';
-
-export type PracticeSessionMode = 'immediate' | 'light_live_correction' | 'strict_live_correction' | 'report_only';
+export type PracticeSessionStatus = 'active' | 'completed' | string;
 
 export type PracticeSessionRecord = {
   correctionMode: PracticeSessionMode;
+  createdAt: IsoTimestamp;
   durationSeconds: number;
-  endedAt: ApiTimestamp | null;
+  endedAt: IsoTimestamp | null;
   firstVoiceLatencyMs: number | null;
   networkLatencyMs: number | null;
   overallScore: number | null;
   personaId: string;
-  reportStatus: 'pending' | 'completed';
+  reportStatus: 'pending' | 'completed' | string;
   scenarioId: string;
   sessionId: string;
-  startedAt: ApiTimestamp;
+  startedAt: IsoTimestamp;
   status: PracticeSessionStatus;
   turnCount: number;
-  createdAt: ApiTimestamp;
-  updatedAt: ApiTimestamp;
+  updatedAt: IsoTimestamp;
 };
 
 export type PracticeSessionTurnRecord = {
-  turnId: string;
+  aiText: string;
+  createdAt: IsoTimestamp;
   sessionId: string;
-  speaker: 'user' | 'assistant';
-  transcript: string;
-  audioUrl: string;
-  startMs: number;
-  endMs: number;
-  seq: number;
-  createdAt: ApiTimestamp;
+  turnId: string;
+  userScore: number;
+  userText: string;
 };
 
 export type PracticeSessionListResponse = {
-  page: {
-    content: PracticeSessionRecord[];
-    pageable: unknown;
-    total: number;
-  };
+  content: PracticeSessionRecord[];
+  number: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
 };
 
-export type ReportIssue = {
-  word?: string;
-  original?: string;
-  corrected?: string;
-  better?: string;
-  issue?: string;
-  explanation?: string;
-  practiceText?: string;
-  reason?: string;
+export type ReportMistake = {
+  category: 'grammar' | 'pronunciation' | 'vocabulary' | string;
+  correction: string;
+  explanation: string;
+  id: string;
+  original: string;
 };
 
 export type ReportRecord = {
-  reportId: string;
-  sessionId: string;
-  status: 'pending' | 'completed' | string;
-  generatedAt: ApiTimestamp;
-  overallScore: number;
+  createdAt: IsoTimestamp;
   durationSeconds: number;
-  turnCount: number;
-  issueCount: number;
+  mistakes: ReportMistake[];
+  overallScore: number;
+  scenarioName: string;
   scores: {
-    pronunciation: number;
     fluency: number;
     grammar: number;
-    scenarioCompletion: number;
+    pronunciation: number;
+    vocabulary: number;
   };
-  scoreFormula: string;
-  summary: string;
-  dataSources: string[];
-  conversationHighlights: {
-    speaker: 'user' | 'assistant';
-    quote: string;
-    comment: string;
-  }[];
-  pronunciationIssues: ReportIssue[];
-  grammarIssues: ReportIssue[];
-  expressionUpgrades: ReportIssue[];
-  recommendedSentences: string[];
-  nextTopics: {
-    scenarioId: string;
-    title: string;
-    difficulty: string;
-    reason: string;
-  }[];
-  mock?: boolean;
+  sessionId: string;
+  suggestions: string[];
+  turnCount: number;
+};
+
+export type ProfileRecord = {
+  [key: string]: unknown;
+};
+
+export type UpdatePreferencesRequest = {
+  correctionMode?: PracticeSessionMode;
+  preferredDifficulty?: string;
+};
+
+export type QuotaRecord = {
+  dailyLimit: number;
+  remaining: number;
+  resetAt: IsoTimestamp;
+  usedToday: number;
+};
+
+export type RecommendationTopic = {
+  [key: string]: unknown;
+};
+
+export type ReviewMistake = {
+  [key: string]: unknown;
+};
+
+export type ReviewSentence = {
+  [key: string]: unknown;
 };

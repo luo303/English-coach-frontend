@@ -2,15 +2,14 @@ import { ApiRuntimeConfig } from '@/config/runtime';
 import {
   AudioOutputChunk,
   ClientRealtimeEvent,
+  PracticeSessionState,
   RealtimeConnectionStatus,
   RealtimeHint,
   RealtimeReducerEvent,
   RealtimeScoreSnapshot,
-  ServerRealtimeEvent,
   TranscriptTurn,
 } from '@/types/realtime';
-
-type RealtimeChannel = 'dialogue' | 'pronunciation' | 'correction';
+import { debugLog } from '@/utils/debugLog';
 
 type RealtimeClientOptions = {
   onEvent: (event: RealtimeReducerEvent) => void;
@@ -19,51 +18,21 @@ type RealtimeClientOptions = {
   token: string;
 };
 
-type ChannelSocket = {
-  channel: RealtimeChannel;
-  id: string;
-  socket: WebSocket;
+type RawServerRealtimeEvent = {
+  payload?: unknown;
+  serverSeq?: number;
+  sessionId?: string;
+  type?: string;
 };
 
-const EOL = '\n';
-const BODY_SEPARATOR = '\n\n';
-const NULL_CHAR = '\0';
-
-function realtimeUrl(sessionId: string, channel: RealtimeChannel) {
+function realtimeUrl(sessionId: string, token: string) {
   const base = ApiRuntimeConfig.realtimeWsBaseUrl.replace(/\/$/, '');
-  return `${base}/practice-sessions/${sessionId}/${channel}`;
+  return `${base}/practice-sessions/${sessionId}/dialogue?token=${encodeURIComponent(token)}`;
 }
 
-function stompFrame(command: string, headers: Record<string, string> = {}, body = '') {
-  const headerLines = Object.keys(headers).map((key) => `${key}:${headers[key]}`);
-  const headerBlock = headerLines.length ? `${EOL}${headerLines.join(EOL)}` : '';
-  return `${command}${headerBlock}${BODY_SEPARATOR}${body}${NULL_CHAR}`;
-}
-
-function parseStompFrame(raw: string) {
-  const trimmed = raw.replace(/\0+$/, '');
-  const separatorIndex = trimmed.indexOf(BODY_SEPARATOR);
-
-  if (separatorIndex < 0) {
-    return null;
-  }
-
-  const headLines = trimmed.slice(0, separatorIndex).split(EOL);
-  const command = headLines.shift() ?? '';
-  const headers: Record<string, string> = {};
-
-  for (const line of headLines) {
-    const index = line.indexOf(':');
-    if (index > 0) {
-      headers[line.slice(0, index)] = line.slice(index + 1);
-    }
-  }
-
-  return {
-    body: trimmed.slice(separatorIndex + BODY_SEPARATOR.length),
-    command,
-    headers,
-  };
+function realtimeLogUrl(sessionId: string) {
+  const base = ApiRuntimeConfig.realtimeWsBaseUrl.replace(/\/$/, '');
+  return `${base}/practice-sessions/${sessionId}/dialogue?token=<redacted>`;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -82,14 +51,46 @@ function asBoolean(value: unknown, fallback = false) {
   return typeof value === 'boolean' ? value : fallback;
 }
 
+function pickText(payload: Record<string, unknown>, keys: string[], fallback = '') {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+  }
+
+  return fallback;
+}
+
+function eventPayload(raw: RawServerRealtimeEvent): Record<string, unknown> {
+  return isObject(raw.payload) ? raw.payload : raw;
+}
+
 function normalizeTurn(payload: unknown, speakerFallback: 'user' | 'assistant', isFinalFallback: boolean): TranscriptTurn {
   const nextPayload = isObject(payload) ? payload : {};
+  const rawSpeaker = pickText(nextPayload, ['speaker', 'role', 'source', 'from']).toLowerCase();
+  const speaker =
+    rawSpeaker === 'assistant' || rawSpeaker === 'ai' || rawSpeaker === 'bot' || rawSpeaker === 'coach'
+      ? 'assistant'
+      : rawSpeaker === 'user'
+        ? 'user'
+        : speakerFallback;
 
   return {
     isFinal: asBoolean(nextPayload.isFinal, isFinalFallback),
-    speaker: nextPayload.speaker === 'assistant' ? 'assistant' : speakerFallback,
-    text: asText(nextPayload.text),
-    turnId: asText(nextPayload.turnId, asText(nextPayload.turnClientId, `${speakerFallback}-${Date.now()}`)),
+    speaker,
+    text: pickText(nextPayload, [
+      'text',
+      'transcript',
+      'content',
+      'delta',
+      'message',
+      'userText',
+      'aiText',
+      'sentence',
+      'utterance',
+    ]),
+    turnId: pickText(nextPayload, ['turnId', 'turnClientId', 'id'], `${speaker}-${Date.now()}`),
   };
 }
 
@@ -135,280 +136,417 @@ function normalizeAudioChunk(payload: unknown, serverSeq: number): AudioOutputCh
   const format: AudioOutputChunk['format'] = rawFormat === 'mp3' || rawFormat === 'aac' ? rawFormat : 'pcm16';
 
   return {
-    audioBase64: asText(nextPayload.data, asText(nextPayload.audioBase64)),
+    audioBase64: pickText(nextPayload, ['data', 'audioBase64', 'audioData', 'base64', 'chunk']),
     format,
-    id: asText(nextPayload.id, `audio-${serverSeq}-${asNumber(nextPayload.seq, 0)}`),
+    id: pickText(nextPayload, ['id', 'chunkId'], `audio-${serverSeq}-${asNumber(nextPayload.seq, 0)}`),
+    isFinal: asBoolean(nextPayload.isFinal),
     sampleRate: asNumber(nextPayload.sampleRate, 24000),
-    turnId: asText(nextPayload.turnId, `assistant-${serverSeq}`),
+    turnId: pickText(nextPayload, ['turnId', 'turnClientId'], `assistant-${serverSeq}`),
   };
 }
 
-function normalizeServerEvent(event: ServerRealtimeEvent): RealtimeReducerEvent {
-  const payload = 'payload' in event ? event.payload : {};
+function normalizeServerEvent(raw: RawServerRealtimeEvent, sessionId: string, serverSeq: number): RealtimeReducerEvent | null {
+  const payload = eventPayload(raw);
 
-  switch (event.type) {
+  switch (raw.type) {
+    case 'session.connected':
+      return {
+        payload: {
+          status: 'connected',
+        },
+        type: 'local.connection_status',
+      };
+
+    case 'session.ready':
+    case 'session_ready':
+      return {
+        payload: {
+          latencyMs: asNumber(isObject(payload) ? payload.latencyMs : undefined),
+        },
+        serverSeq,
+        sessionId,
+        type: 'session_ready',
+      };
+
+    case 'pong':
+      return {
+        payload: {
+          estimatedRttMs: asNumber(isObject(payload) ? payload.estimatedRttMs : undefined),
+        },
+        serverSeq,
+        sessionId,
+        type: 'pong',
+      };
+
+    case 'transcript.partial':
     case 'transcript_delta':
       return {
-        ...event,
         payload: normalizeTurn(payload, 'user', false),
+        serverSeq,
+        sessionId,
+        type: 'transcript_delta',
       };
+
+    case 'transcript.final':
     case 'transcript_final':
       return {
-        ...event,
         payload: normalizeTurn(payload, 'user', true),
+        serverSeq,
+        sessionId,
+        type: 'transcript_final',
       };
-    case 'ai_reply_delta':
+
+    case 'audio.output':
+    case 'ai_audio_chunk': {
+      const chunk = normalizeAudioChunk(payload, serverSeq);
+
+      if (!chunk.audioBase64) {
+        if (chunk.isFinal) {
+          return {
+            payload: {
+              reason: 'empty_audio_output_final',
+              status: 'listening',
+            },
+            serverSeq,
+            sessionId,
+            type: 'session_state',
+          };
+        }
+
+        return null;
+      }
+
       return {
-        ...event,
-        payload: normalizeTurn(payload, 'assistant', false),
+        payload: chunk,
+        serverSeq,
+        sessionId,
+        type: 'ai_audio_chunk',
       };
-    case 'ai_audio_chunk':
+    }
+
+    case 'audio_chunk_ack':
       return {
-        ...event,
-        payload: normalizeAudioChunk(payload, event.serverSeq),
+        payload: {
+          accepted: asBoolean(isObject(payload) ? payload.accepted : undefined, true),
+          chunkBytes: asNumber(isObject(payload) ? payload.chunkBytes : undefined),
+          finalChunk: asBoolean(isObject(payload) ? payload.finalChunk : undefined),
+          seq: asNumber(isObject(payload) ? payload.seq : undefined),
+          totalBytes: asNumber(isObject(payload) ? payload.totalBytes : undefined),
+          turnClientId: asText(isObject(payload) ? payload.turnClientId : undefined),
+        },
+        serverSeq,
+        sessionId,
+        type: 'audio_chunk_ack',
       };
+
     case 'pronunciation_hint':
       return {
-        ...event,
-        payload: normalizeHint('pronunciation', payload, `pronunciation-${event.serverSeq}`),
+        payload: normalizeHint('pronunciation', payload, `pronunciation-${serverSeq}`),
+        serverSeq,
+        sessionId,
+        type: 'pronunciation_hint',
       };
+
     case 'grammar_hint':
       return {
-        ...event,
-        payload: normalizeHint('grammar', payload, `grammar-${event.serverSeq}`),
+        payload: normalizeHint('grammar', payload, `grammar-${serverSeq}`),
+        serverSeq,
+        sessionId,
+        type: 'grammar_hint',
       };
-    case 'expression_hint':
-      return {
-        ...event,
-        payload: normalizeHint('expression', payload, `expression-${event.serverSeq}`),
-      };
+
     case 'score_snapshot':
       return {
-        ...event,
         payload: normalizeScore(payload),
+        serverSeq,
+        sessionId,
+        type: 'score_snapshot',
       };
+
+    case 'session_state':
+      return {
+        payload: {
+          reason: asText(isObject(payload) ? payload.reason : undefined),
+          status: asText(isObject(payload) ? payload.status : undefined, 'listening') as PracticeSessionState,
+        },
+        serverSeq,
+        sessionId,
+        type: 'session_state',
+      } as RealtimeReducerEvent;
+
+    case 'error':
+      return {
+        payload: {
+          code: asText(isObject(payload) ? payload.code : undefined, 'realtime_error'),
+          message: asText(isObject(payload) ? payload.message : undefined, '实时通话异常。'),
+          recoverable: asBoolean(isObject(payload) ? payload.recoverable : undefined),
+        },
+        serverSeq,
+        sessionId,
+        type: 'error',
+      };
+
     default:
-      return event;
+      return null;
   }
 }
 
-function withSentAt(event: ClientRealtimeEvent): ClientRealtimeEvent {
-  return {
-    ...event,
-    sentAt: event.sentAt ?? new Date().toISOString(),
-  } as ClientRealtimeEvent;
-}
-
-function parseServerEvent(rawBody: string): RealtimeReducerEvent | null {
+function parseServerEvent(rawBody: string, sessionId: string, serverSeq: number): RealtimeReducerEvent | null {
   try {
-    const event = JSON.parse(rawBody) as ServerRealtimeEvent;
-    if (!event || typeof event !== 'object' || !('type' in event)) {
+    const raw = JSON.parse(rawBody) as RawServerRealtimeEvent;
+    if (!raw || typeof raw !== 'object' || !raw.type) {
       return null;
     }
-    return normalizeServerEvent(event);
+    return normalizeServerEvent(raw, raw.sessionId ?? sessionId, raw.serverSeq ?? serverSeq);
   } catch {
     return null;
   }
 }
 
-function logWsResponse(channel: RealtimeChannel, command: string, headers: Record<string, string>, body: string) {
-  console.log('[WS response]', {
-    body,
-    channel,
-    command,
-    headers,
-  });
+function summarizeClientEvent(event: ClientRealtimeEvent) {
+  if (event.type === 'audio_chunk') {
+    return {
+      audioBase64Length: event.payload.data.length,
+      format: event.payload.format,
+      sampleRate: event.payload.sampleRate,
+      turnClientId: event.payload.turnClientId,
+      type: event.type,
+    };
+  }
+
+  return {
+    payload: event.payload,
+    type: event.type,
+  };
 }
 
-function logWsSend(channel: RealtimeChannel, command: string, headers: Record<string, string>, body = '') {
-  console.log('[WS send]', {
-    body,
-    channel,
-    command,
-    headers,
-  });
+function summarizeServerBody(rawBody: string) {
+  try {
+    const raw = JSON.parse(rawBody) as RawServerRealtimeEvent;
+    const payload = eventPayload(raw);
+    const data = pickText(payload, ['data', 'audioBase64', 'audioData', 'base64', 'chunk']);
+    const text = pickText(payload, [
+      'text',
+      'transcript',
+      'content',
+      'delta',
+      'message',
+      'userText',
+      'aiText',
+      'sentence',
+      'utterance',
+    ]);
+
+    return {
+      audioBase64Length: data ? data.length : undefined,
+      audioFields: {
+        hasAudioBase64: Boolean(payload.audioBase64),
+        hasAudioData: Boolean(payload.audioData),
+        hasBase64: Boolean(payload.base64),
+        hasChunk: Boolean(payload.chunk),
+        hasData: Boolean(payload.data),
+        sampleRate: payload.sampleRate,
+      },
+      rawLength: rawBody.length,
+      rootKeys: Object.keys(raw as Record<string, unknown>),
+      payloadKeys: Object.keys(payload),
+      serverSeq: raw.serverSeq,
+      sessionId: raw.sessionId,
+      speakerFields: {
+        from: payload.from,
+        role: payload.role,
+        source: payload.source,
+        speaker: payload.speaker,
+      },
+      text,
+      textFields: {
+        aiText: payload.aiText,
+        content: payload.content,
+        delta: payload.delta,
+        message: payload.message,
+        text: payload.text,
+        transcript: payload.transcript,
+        userText: payload.userText,
+      },
+      type: raw.type,
+    };
+  } catch {
+    return {
+      rawLength: rawBody.length,
+      type: 'unparseable',
+    };
+  }
+}
+
+function summarizeReducerEvent(event: RealtimeReducerEvent) {
+  switch (event.type) {
+    case 'transcript_delta':
+    case 'transcript_final':
+      return {
+        isFinal: event.payload.isFinal,
+        speaker: event.payload.speaker,
+        text: event.payload.text,
+        textLength: event.payload.text.length,
+        turnId: event.payload.turnId,
+        type: event.type,
+      };
+
+    case 'ai_audio_chunk':
+      return {
+        audioBase64Length: event.payload.audioBase64.length,
+        format: event.payload.format,
+        isFinal: event.payload.isFinal,
+        sampleRate: event.payload.sampleRate,
+        turnId: event.payload.turnId,
+        type: event.type,
+      };
+
+    case 'audio_chunk_ack':
+      return {
+        accepted: event.payload.accepted,
+        seq: event.payload.seq,
+        turnClientId: event.payload.turnClientId,
+        type: event.type,
+      };
+
+    case 'local.connection_status':
+      return {
+        status: event.payload.status,
+        type: event.type,
+      };
+
+    default:
+      return {
+        type: event.type,
+      };
+  }
 }
 
 export class RealtimeClient {
-  private sockets = new Map<RealtimeChannel, ChannelSocket>();
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closedByUser = false;
+  private lastAudioSendLogAt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private retryCount = 0;
-  private handshakeOpenChannels = 0;
-  private connectedReported = false;
+  private serverSeq = 0;
+  private socket: WebSocket | null = null;
 
   constructor(private readonly options: RealtimeClientOptions) {}
 
   connect() {
     this.closedByUser = false;
-    this.handshakeOpenChannels = 0;
-    this.connectedReported = false;
     this.options.onStatusChange?.('connecting');
-    this.openChannel('dialogue');
-    this.openChannel('pronunciation');
-    this.openChannel('correction');
+    this.openSocket();
   }
 
   close() {
     this.closedByUser = true;
+
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
 
-    for (const { socket } of this.sockets.values()) {
-      try {
-        socket.send(stompFrame('DISCONNECT', { receipt: `disc-${Date.now()}` }));
-      } catch {}
+    try {
+      this.socket?.close();
+    } catch {}
 
-      try {
-        socket.close();
-      } catch {}
-    }
-
-    this.sockets.clear();
+    this.socket = null;
     this.options.onStatusChange?.('closed');
   }
 
   send(event: ClientRealtimeEvent) {
-    const socket = this.sockets.get('dialogue')?.socket;
-
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      console.log('[WS send skipped]', {
-        event,
-        readyState: socket?.readyState,
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      debugLog('WS', 'send skipped', {
+        event: summarizeClientEvent(event),
+        readyState: this.socket?.readyState,
       });
       return false;
     }
 
-    const sendHeaders = {
-      'content-type': 'application/json',
-      destination: `/app/practice-sessions/${this.options.sessionId}/dialogue`,
-    };
-    const body = JSON.stringify(withSentAt(event));
-    logWsSend('dialogue', 'SEND', sendHeaders, body);
-    socket.send(
-      stompFrame(
-        'SEND',
-        sendHeaders,
-        body,
-      ),
-    );
+    const body = JSON.stringify(event);
+    const now = Date.now();
+    if (event.type !== 'audio_chunk' || now - this.lastAudioSendLogAt > 2000) {
+      if (event.type === 'audio_chunk') {
+        this.lastAudioSendLogAt = now;
+      }
 
+      debugLog('WS', 'send', {
+        event: summarizeClientEvent(event),
+        url: realtimeLogUrl(this.options.sessionId),
+      });
+    }
+    this.socket.send(body);
     return true;
   }
 
-  private openChannel(channel: RealtimeChannel) {
-    const socket = new WebSocket(realtimeUrl(this.options.sessionId, channel));
-    const subscriptionId = `${channel}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
-    this.sockets.set(channel, {
-      channel,
-      id: subscriptionId,
-      socket,
+  private sendRecordingStart() {
+    this.send({
+      payload: {
+        grammarVisible: true,
+        pronunciationVisible: true,
+      },
+      type: 'recording_start',
     });
+  }
+
+  private openSocket() {
+    const socket = new WebSocket(realtimeUrl(this.options.sessionId, this.options.token));
+    this.socket = socket;
 
     socket.onopen = () => {
-      console.log('[WS open]', {
-        channel,
-        url: realtimeUrl(this.options.sessionId, channel),
+      debugLog('WS', 'open', {
+        sessionId: this.options.sessionId,
+        url: realtimeLogUrl(this.options.sessionId),
       });
-      const connectHeaders: Record<string, string> = {
-        'accept-version': '1.2',
-        Authorization: `Bearer ${this.options.token}`,
-        host: 'localhost',
-      };
-      connectHeaders['heart-beat'] = '10000,10000';
-
-      logWsSend(channel, 'CONNECT', connectHeaders);
-      socket.send(
-        stompFrame('CONNECT', connectHeaders),
-      );
+      this.retryCount = 0;
     };
 
     socket.onmessage = (message) => {
-      const text = String(message.data);
-      const frame = parseStompFrame(text);
+      const body = String(message.data);
+      debugLog('WS', 'response', {
+        event: summarizeServerBody(body),
+      });
 
-      if (!frame) {
-        console.log('[WS raw response]', {
-          body: text,
-          channel,
-        });
+      this.serverSeq += 1;
+      const event = parseServerEvent(body, this.options.sessionId, this.serverSeq);
+
+      if (!event) {
         return;
       }
 
-      logWsResponse(channel, frame.command, frame.headers, frame.body);
+      debugLog('WS', 'dispatch normalized event', summarizeReducerEvent(event));
 
-      if (frame.command === 'CONNECTED') {
-        this.handshakeOpenChannels += 1;
+      this.options.onEvent(event);
 
-        const subscribeHeaders = {
-          ack: 'auto',
-          destination: `/topic/practice-sessions/${this.options.sessionId}/${channel}`,
-          id: subscriptionId,
-        };
-        logWsSend(channel, 'SUBSCRIBE', subscribeHeaders);
-        socket.send(
-          stompFrame('SUBSCRIBE', subscribeHeaders),
-        );
-
-        if (!this.connectedReported && this.handshakeOpenChannels >= 3) {
-          this.connectedReported = true;
-          this.retryCount = 0;
-          this.options.onStatusChange?.('connected');
-
-          this.send({
-            clientSeq: 1,
-            payload: {
-              grammarVisible: true,
-              pronunciationVisible: true,
-            },
-            sessionId: this.options.sessionId,
-            type: 'recording_start',
-          });
-        }
-
-        return;
-      }
-
-      if (frame.command === 'MESSAGE') {
-        const event = parseServerEvent(frame.body);
-        if (event) {
-          this.options.onEvent(event);
-        }
-        return;
-      }
-
-      if (frame.command === 'ERROR') {
-        this.scheduleReconnect(channel);
+      if ('type' in event && event.type === 'local.connection_status' && event.payload.status === 'connected') {
+        this.options.onStatusChange?.('connected');
+        this.sendRecordingStart();
       }
     };
 
     socket.onerror = () => {
-      console.log('[WS error]', {
-        channel,
+      debugLog('WS', 'error', {
         readyState: socket.readyState,
+        sessionId: this.options.sessionId,
       });
       this.options.onStatusChange?.('reconnecting');
     };
 
     socket.onclose = () => {
-      console.log('[WS close]', {
-        channel,
+      debugLog('WS', 'close', {
         readyState: socket.readyState,
+        sessionId: this.options.sessionId,
       });
-      this.sockets.delete(channel);
 
       if (this.closedByUser) {
         return;
       }
 
-      this.scheduleReconnect(channel);
+      this.scheduleReconnect();
     };
   }
 
-  private scheduleReconnect(channel: RealtimeChannel) {
+  private scheduleReconnect() {
     if (this.closedByUser || this.reconnectTimer) {
       return;
     }
@@ -417,7 +555,7 @@ export class RealtimeClient {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.retryCount += 1;
-      this.openChannel(channel);
+      this.openSocket();
     }, Math.min(5000, 700 * Math.max(1, this.retryCount + 1)));
   }
 }

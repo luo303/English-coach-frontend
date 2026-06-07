@@ -47,15 +47,13 @@ export type AudioOutputChunk = {
   turnId: string;
   audioBase64: string;
   format: 'pcm16' | 'mp3' | 'aac';
+  isFinal?: boolean;
   sampleRate: number;
 };
 
 export type ClientRealtimeEvent =
   | {
       type: 'recording_start';
-      clientSeq: number;
-      sessionId: string;
-      sentAt?: string;
       payload: {
         pronunciationVisible: boolean;
         grammarVisible: boolean;
@@ -63,47 +61,21 @@ export type ClientRealtimeEvent =
     }
   | {
       type: 'audio_chunk';
-      clientSeq: number;
-      sessionId: string;
-      sentAt?: string;
       payload: {
-        turnClientId: string;
-        seq: number;
-        audioFormat: 'pcm_s16le';
-        sampleRate: 16000;
-        channels: 1;
-        isFinal: boolean;
         data: string;
-      };
-    }
-  | {
-      type: 'user_turn_end';
-      clientSeq: number;
-      sessionId: string;
-      sentAt?: string;
-      payload: {
+        format: 'pcm16';
+        sampleRate: 16000;
         turnClientId: string;
-        transcript: string;
-        pronunciationVisible: boolean;
-        grammarVisible: boolean;
-        startMs: number;
-        endMs: number;
       };
     }
   | {
       type: 'session_control';
-      clientSeq: number;
-      sessionId: string;
-      sentAt?: string;
       payload: {
-        action: 'pause' | 'resume' | 'end' | 'cancel_ai_speech';
+        action: 'end';
       };
     }
   | {
       type: 'ping';
-      clientSeq: number;
-      sessionId: string;
-      sentAt?: string;
       payload: {
         clientTime: string;
       };
@@ -197,6 +169,12 @@ export type ServerRealtimeEvent =
 
 export type LocalRealtimeEvent =
   | {
+      type: 'local.prepare_session';
+      payload: {
+        scenario: Scenario;
+      };
+    }
+  | {
       type: 'local.reset_session';
       payload: {
         scenario: Scenario;
@@ -216,6 +194,14 @@ export type LocalRealtimeEvent =
       type: 'local.connection_status';
       payload: {
         status: RealtimeConnectionStatus;
+      };
+    }
+  | {
+      type: 'local.error';
+      payload: {
+        code: string;
+        message: string;
+        recoverable: boolean;
       };
     }
   | {
@@ -239,9 +225,4 @@ export type SessionRealtimeState = {
   sessionId: string | null;
   status: PracticeSessionState;
   turns: TranscriptTurn[];
-};
-
-export type MockRealtimeStep = {
-  delayMs: number;
-  event: RealtimeReducerEvent;
 };

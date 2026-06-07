@@ -1,9 +1,10 @@
 import { ApiRuntimeConfig } from '@/config/runtime';
 import { ApiResponse } from '@/types/api';
+import { debugLog } from '@/utils/debugLog';
 
 type RequestOptions = {
   body?: unknown;
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'PATCH' | 'POST';
   token?: string | null;
 };
 
@@ -22,11 +23,13 @@ function isApiResponse<T>(value: unknown): value is ApiResponse<T> {
     return false;
   }
 
-  return 'code' in value && 'info' in value && 'requestId' in value && 'data' in value;
+  return 'code' in value && 'data' in value;
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}) {
   const url = `${ApiRuntimeConfig.apiBaseUrl}${path}`;
+  const method = options.method ?? 'GET';
+  const startedAt = Date.now();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -35,10 +38,18 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}) 
     headers.Authorization = `Bearer ${options.token}`;
   }
 
+  debugLog('REST', 'request', {
+    body: options.body,
+    hasToken: Boolean(options.token),
+    method,
+    path,
+    url,
+  });
+
   const response = await fetch(url, {
     body: options.body ? JSON.stringify(options.body) : undefined,
     headers,
-    method: options.method ?? 'GET',
+    method,
   });
 
   const text = await response.text();
@@ -47,18 +58,22 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}) 
   try {
     payload = text ? (JSON.parse(text) as ApiResponse<T>) : null;
   } catch {
-    console.log('[API response]', {
+    debugLog('REST', 'non-json response', {
       body: text,
-      method: options.method ?? 'GET',
+      durationMs: Date.now() - startedAt,
+      method,
+      path,
       status: response.status,
       url,
     });
     throw new ApiClientError('API returned non-JSON response.', response.status);
   }
 
-  console.log('[API response]', {
+  debugLog('REST', 'response', {
     body: payload,
-    method: options.method ?? 'GET',
+    durationMs: Date.now() - startedAt,
+    method,
+    path,
     status: response.status,
     url,
   });

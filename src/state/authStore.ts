@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 import { fetchCurrentUser, loginAnonymously } from '@/clients/authClient';
 import { ApiUser } from '@/types/api';
+import { debugLog } from '@/utils/debugLog';
 
 type AuthStatus = 'idle' | 'loading' | 'authenticated' | 'error';
 
@@ -21,9 +22,15 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   error: null,
   login: async () => {
     set({ error: null, status: 'loading' });
+    debugLog('AUTH', 'anonymous login start');
 
     try {
       const response = await loginAnonymously();
+      debugLog('AUTH', 'anonymous login success', {
+        expiresAt: response.expiresAt,
+        tokenType: response.tokenType,
+        userId: response.user.userId,
+      });
       set({
         accessToken: response.accessToken,
         error: null,
@@ -31,6 +38,9 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         user: response.user,
       });
     } catch (error) {
+      debugLog('AUTH', 'anonymous login failed', {
+        message: error instanceof Error ? error.message : String(error),
+      });
       set({
         error: error instanceof Error ? error.message : 'Login failed.',
         status: 'error',
@@ -39,9 +49,15 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   },
   loginWithBackend: async () => {
     set({ error: null, status: 'loading' });
+    debugLog('AUTH', 'backend login start');
 
     try {
       const response = await loginAnonymously();
+      debugLog('AUTH', 'backend login success', {
+        expiresAt: response.expiresAt,
+        tokenType: response.tokenType,
+        userId: response.user.userId,
+      });
       set({
         accessToken: response.accessToken,
         error: null,
@@ -49,6 +65,9 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         user: response.user,
       });
     } catch (error) {
+      debugLog('AUTH', 'backend login failed', {
+        message: error instanceof Error ? error.message : String(error),
+      });
       set({
         error: error instanceof Error ? error.message : 'Login failed.',
         status: 'error',
@@ -63,15 +82,22 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
 
     set({ error: null, status: 'loading' });
+    debugLog('AUTH', 'refresh current user start');
 
     try {
       const user = await fetchCurrentUser(token);
+      debugLog('AUTH', 'refresh current user success', {
+        userId: user.userId,
+      });
       set({
         error: null,
         status: 'authenticated',
         user,
       });
     } catch (error) {
+      debugLog('AUTH', 'refresh current user failed', {
+        message: error instanceof Error ? error.message : String(error),
+      });
       set({
         error: error instanceof Error ? error.message : 'Failed to refresh current user.',
         status: 'error',

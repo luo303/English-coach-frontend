@@ -7,6 +7,7 @@ import { ScoreTrend } from '@/components/feedback/ScoreTrend';
 import { useAuthStore } from '@/state/authStore';
 import { PracticeSessionRecord } from '@/types/api';
 import { HistoryRecord } from '@/types/practice';
+import { debugLog } from '@/utils/debugLog';
 
 function formatDuration(seconds: number) {
   const minutes = Math.floor(seconds / 60)
@@ -43,15 +44,25 @@ export function HistoryScreen() {
 
     let cancelled = false;
     setError(null);
+    debugLog('HISTORY', 'load sessions start');
 
     void fetchPracticeSessions(accessToken)
       .then((response) => {
         if (!cancelled) {
-          setSessions(response.page.content);
+          debugLog('HISTORY', 'load sessions success', {
+            count: response.content.length,
+            page: response.number,
+            size: response.size,
+            totalElements: response.totalElements,
+          });
+          setSessions(response.content);
         }
       })
       .catch((nextError) => {
         if (!cancelled) {
+          debugLog('HISTORY', 'load sessions failed', {
+            message: nextError instanceof Error ? nextError.message : String(nextError),
+          });
           setError(nextError instanceof Error ? nextError.message : '加载历史会话失败。');
           setSessions([]);
         }
@@ -76,8 +87,8 @@ export function HistoryScreen() {
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
       {!error && records.length === 0 ? <Text style={styles.emptyText}>暂无后端历史会话。</Text> : null}
 
-      {records.map((record) => (
-        <ScoreTrend key={record.title} record={record} />
+      {records.map((record, index) => (
+        <ScoreTrend key={`${record.title}-${index}`} record={record} />
       ))}
     </ScrollView>
   );

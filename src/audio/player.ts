@@ -6,6 +6,7 @@ import {
 } from 'react-native-audio-api';
 
 import { pcm16Base64ToFloat } from '@/audio/pcm';
+import { debugLog } from '@/utils/debugLog';
 
 export type PlayerSpikeStats = {
   enqueuedBuffers: number;
@@ -27,15 +28,21 @@ export class AudioApiRealtimePlayer {
   }
 
   async enqueuePcm16(audioBase64: string, sampleRate: number) {
+    debugLog('PLAYER', 'enqueue pcm16 start', {
+      audioBase64Length: audioBase64.length,
+      sampleRate,
+    });
+
     AudioManager.setAudioSessionOptions({
-      iosCategory: 'playback',
+      iosCategory: 'playAndRecord',
       iosMode: 'default',
-      iosOptions: ['defaultToSpeaker', 'mixWithOthers'],
+      iosOptions: ['defaultToSpeaker', 'allowBluetoothHFP', 'mixWithOthers'],
     });
 
     const sessionActive = await AudioManager.setAudioSessionActivity(true);
 
     if (!sessionActive) {
+      debugLog('PLAYER', 'audio session activation failed');
       throw new Error('Failed to activate audio session for playback.');
     }
 
@@ -47,6 +54,11 @@ export class AudioApiRealtimePlayer {
     }
 
     const samples = pcm16Base64ToFloat(audioBase64);
+    debugLog('PLAYER', 'decoded pcm16', {
+      durationMs: Math.round((samples.length / sampleRate) * 1000),
+      samples: samples.length,
+      sampleRate,
+    });
     const buffer = this.context.createBuffer(1, samples.length, sampleRate);
     buffer.copyToChannel(samples, 0);
     this.queue.enqueueBuffer(buffer);
@@ -55,6 +67,9 @@ export class AudioApiRealtimePlayer {
       this.queue.connect(this.context.destination);
       this.queue.start(0, 0);
       this.started = true;
+      debugLog('PLAYER', 'queue started', {
+        sampleRate,
+      });
     }
 
     this.stats = {
@@ -62,13 +77,14 @@ export class AudioApiRealtimePlayer {
       lastBufferDurationMs: Math.round((samples.length / sampleRate) * 1000),
       sampleRate,
     };
+    debugLog('PLAYER', 'enqueue pcm16 success', this.stats);
   }
 
   async playOneShotPcm16(audioBase64: string, sampleRate: number) {
     AudioManager.setAudioSessionOptions({
-      iosCategory: 'playback',
+      iosCategory: 'playAndRecord',
       iosMode: 'default',
-      iosOptions: ['defaultToSpeaker', 'mixWithOthers'],
+      iosOptions: ['defaultToSpeaker', 'allowBluetoothHFP', 'mixWithOthers'],
     });
 
     const sessionActive = await AudioManager.setAudioSessionActivity(true);
@@ -105,10 +121,12 @@ export class AudioApiRealtimePlayer {
   }
 
   clearQueue() {
+    debugLog('PLAYER', 'clear queue', this.stats);
     this.queue?.clearBuffers();
   }
 
   stop() {
+    debugLog('PLAYER', 'stop', this.stats);
     this.queue?.clearBuffers();
     this.queue?.stop();
     this.queue = null;
@@ -117,6 +135,7 @@ export class AudioApiRealtimePlayer {
   }
 
   async close() {
+    debugLog('PLAYER', 'close requested', this.stats);
     this.stop();
     await this.context?.close();
     await AudioManager.setAudioSessionActivity(false);

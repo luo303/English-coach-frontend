@@ -15,17 +15,17 @@ export function LoginScreen() {
       <View style={styles.header}>
         <Text style={styles.eyebrow}>AI English Partner</Text>
         <Text style={styles.title}>登录后开始练习</Text>
-        <Text style={styles.subtitle}>当前默认进入模拟环境；真实后端登录链路已保留，联调时再切换。</Text>
+        <Text style={styles.subtitle}>使用后端匿名登录创建你的练习身份，随后进入真实场景与实时语音链路。</Text>
       </View>
 
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>匿名身份</Text>
-        <Text style={styles.panelText}>进入 App 前必须先登录。模拟登录会生成本地 token 和匿名用户。</Text>
+        <Text style={styles.panelText}>进入 App 前必须先登录。后端会签发 accessToken 和匿名用户信息。</Text>
         <Text style={styles.apiText}>API {ApiRuntimeConfig.apiBaseUrl}</Text>
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <Pressable disabled={isLoading} onPress={() => void login()} style={styles.primaryButton}>
-          <Text style={styles.primaryButtonText}>{isLoading ? '登录中...' : '模拟匿名登录'}</Text>
+          <Text style={styles.primaryButtonText}>{isLoading ? '登录中...' : '匿名登录'}</Text>
         </Pressable>
       </View>
     </View>

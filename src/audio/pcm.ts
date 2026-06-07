@@ -159,17 +159,18 @@ export function audioBufferToMonoSamples(buffer: AudioBuffer) {
   return mixed;
 }
 
-export function audioBufferToPcm16Frame(buffer: AudioBuffer, timestampSec: number) {
-  const samples = audioBufferToMonoSamples(buffer);
+export function audioBufferToPcm16Frame(buffer: AudioBuffer, timestampSec: number, targetSampleRate = 16000) {
+  const sourceSamples = audioBufferToMonoSamples(buffer);
+  const samples = resampleLinear(sourceSamples, buffer.sampleRate, targetSampleRate);
   const bytes = floatToPcm16Bytes(samples);
 
   return {
     audioBase64: pcm16BytesToBase64(bytes),
     channels: 1 as const,
-    durationMs: Math.round((samples.length / buffer.sampleRate) * 1000),
+    durationMs: Math.round((samples.length / targetSampleRate) * 1000),
     level: calculateAudioLevel(samples),
     numFrames: samples.length,
-    sampleRate: buffer.sampleRate,
+    sampleRate: targetSampleRate,
     timestampSec,
   };
 }
