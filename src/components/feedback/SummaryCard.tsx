@@ -1,4 +1,5 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Card, Chip, Typography as Text } from 'heroui-native';
+import { View } from 'react-native';
 
 import { AppPalette } from '@/constants/appPalette';
 
@@ -10,58 +11,30 @@ type SummaryCardProps = {
 
 export function SummaryCard({ score, summary, title }: SummaryCardProps) {
   return (
-    <View style={styles.scoreHero}>
-      <View style={styles.scoreOrb}>
-        <Text style={styles.scoreNumber}>{Math.round(score)}</Text>
-      </View>
-      <View style={styles.scoreCopy}>
-        <Text style={styles.scoreTitle}>{title}</Text>
-        <Text style={styles.scoreText}>{summary}</Text>
-      </View>
-    </View>
+    <Card
+      className="mb-4 border border-border bg-surface p-5"
+      style={{ backgroundColor: AppPalette.surface, borderColor: AppPalette.border, borderRadius: 18 }}
+    >
+      <Card.Body className="gap-4">
+        <View className="flex-row items-center gap-4">
+          <View className="h-20 w-20 items-center justify-center rounded-2xl bg-accent" style={{ backgroundColor: AppPalette.primary, borderRadius: 18 }}>
+            <Text className="text-3xl font-black text-accent-foreground" style={{ color: '#FFFFFF' }}>
+              {Math.round(score)}
+            </Text>
+          </View>
+          <View className="flex-1">
+            <Chip color="success" size="sm" variant="soft" className="mb-2 self-start">
+              报告已生成
+            </Chip>
+            <Text className="text-xl font-black leading-7 text-foreground" style={{ color: AppPalette.foreground }}>
+              {title}
+            </Text>
+          </View>
+        </View>
+        <Text className="text-base leading-6 text-muted" numberOfLines={2} style={{ color: AppPalette.muted }}>
+          {summary}
+        </Text>
+      </Card.Body>
+    </Card>
   );
 }
-
-const styles = StyleSheet.create({
-  scoreHero: {
-    alignItems: 'center',
-    backgroundColor: AppPalette.card,
-    borderColor: AppPalette.line,
-    borderRadius: 22,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 18,
-    marginBottom: 14,
-    padding: 18,
-  },
-  scoreOrb: {
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderColor: AppPalette.blue,
-    borderRadius: 50,
-    borderWidth: 12,
-    height: 100,
-    justifyContent: 'center',
-    width: 100,
-  },
-  scoreNumber: {
-    color: AppPalette.ink,
-    fontSize: 27,
-    fontWeight: '900',
-  },
-  scoreCopy: {
-    flex: 1,
-  },
-  scoreTitle: {
-    color: AppPalette.ink,
-    fontSize: 20,
-    fontWeight: '900',
-    lineHeight: 26,
-    marginBottom: 6,
-  },
-  scoreText: {
-    color: AppPalette.muted,
-    fontSize: 15,
-    lineHeight: 22,
-  },
-});

@@ -1,4 +1,5 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Card, Chip, Typography as Text } from 'heroui-native';
+import { View } from 'react-native';
 
 import { AppPalette } from '@/constants/appPalette';
 import { HistoryRecord } from '@/types/practice';
@@ -9,77 +10,38 @@ type ScoreTrendProps = {
 
 export function ScoreTrend({ record }: ScoreTrendProps) {
   return (
-    <View style={styles.historyCard}>
-      <View style={styles.historyTop}>
-        <Text style={styles.historyTitle}>{record.title}</Text>
-        <Text style={styles.deltaBadge}>{record.delta}</Text>
-      </View>
-      <View style={styles.historyStats}>
-        <HistoryStat label="总分" value={String(record.score)} />
-        <HistoryStat label="时长" value={record.time} />
-        <HistoryStat label="表达" value={String(record.expression)} />
-      </View>
-    </View>
+    <Card
+      className="mb-3 border border-border bg-surface p-4"
+      style={{ backgroundColor: AppPalette.surface, borderColor: AppPalette.border, borderRadius: 18 }}
+    >
+      <Card.Body className="gap-4">
+        <View className="flex-row items-start justify-between gap-3">
+          <Text className="flex-1 text-lg font-black text-foreground" style={{ color: AppPalette.foreground }}>
+            {record.title}
+          </Text>
+          <Chip color="accent" size="sm" variant="soft">
+            {record.delta}
+          </Chip>
+        </View>
+        <View className="flex-row justify-between gap-3 border-t border-border pt-3" style={{ borderColor: AppPalette.separator }}>
+          <HistoryStat label="总分" value={String(record.score)} />
+          <HistoryStat label="时长" value={record.time} />
+          <HistoryStat label="轮次" value={String(record.expression)} />
+        </View>
+      </Card.Body>
+    </Card>
   );
 }
 
 function HistoryStat({ label, value }: { label: string; value: string }) {
   return (
-    <View style={styles.historyStat}>
-      <Text style={styles.historyStatLabel}>{label}</Text>
-      <Text style={styles.historyStatValue}>{value}</Text>
+    <View className="min-w-20">
+      <Text className="mb-1 text-sm font-semibold text-muted" style={{ color: AppPalette.muted }}>
+        {label}
+      </Text>
+      <Text className="text-base font-black text-foreground" style={{ color: AppPalette.foreground }}>
+        {value}
+      </Text>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  historyCard: {
-    backgroundColor: AppPalette.card,
-    borderColor: AppPalette.line,
-    borderRadius: 18,
-    borderWidth: 1,
-    marginBottom: 13,
-    padding: 16,
-  },
-  historyTop: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  historyTitle: {
-    color: AppPalette.ink,
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '900',
-  },
-  deltaBadge: {
-    backgroundColor: AppPalette.blueSoft,
-    borderColor: '#C8D8FF',
-    borderRadius: 999,
-    borderWidth: 1,
-    color: AppPalette.blue,
-    fontSize: 13,
-    fontWeight: '900',
-    overflow: 'hidden',
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-  },
-  historyStats: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  historyStat: {
-    minWidth: 70,
-  },
-  historyStatLabel: {
-    color: AppPalette.muted,
-    fontSize: 13,
-    marginBottom: 5,
-  },
-  historyStatValue: {
-    color: AppPalette.ink,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-});

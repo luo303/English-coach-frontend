@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Surface, Tabs } from 'heroui-native';
+import { View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fetchScenarios } from '@/clients/scenarioClient';
@@ -15,13 +16,15 @@ import { ScenarioRecord } from '@/types/api';
 import { Scenario, TabItem, TabKey } from '@/types/practice';
 import { debugLog } from '@/utils/debugLog';
 
-const TAB_BAR_HEIGHT = 72;
+const TAB_BAR_HEIGHT = 70;
 
 const tabs: TabItem[] = [
-  { key: 'practice', label: '练习', icon: '◎' },
-  { key: 'history', label: '复盘', icon: '▤' },
-  { key: 'audio', label: '音频', icon: '◌' },
+  { key: 'practice', label: '练习' },
+  { key: 'history', label: '复盘' },
+  { key: 'audio', label: '音频' },
 ];
+
+const tabKeys = tabs.map((tab) => tab.key);
 
 function toScenario(record: ScenarioRecord): Scenario {
   return {
@@ -40,11 +43,14 @@ export function AppNavigator() {
   const [activeTab, setActiveTab] = useState<TabKey>('practice');
   const [lastSessionId, setLastSessionId] = useState<string | null>(null);
   const [scenarioError, setScenarioError] = useState<string | null>(null);
+  const [scenarioLoading, setScenarioLoading] = useState(false);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [selectedScenario, setSelectedScenario] = useState<string | null>(null);
   const accessToken = useAuthStore((state) => state.accessToken);
   const isAuthenticated = useAuthStore((state) => state.status === 'authenticated');
   const insets = useSafeAreaInsets();
+  const isConversation = activeTab === 'conversation';
+  const navValue = tabKeys.includes(activeTab) ? activeTab : 'practice';
   const currentScenario = useMemo(
     () => scenarios.find((scenario) => scenario.id === selectedScenario) ?? scenarios[0] ?? null,
     [scenarios, selectedScenario],
@@ -52,6 +58,7 @@ export function AppNavigator() {
 
   useEffect(() => {
     if (!isAuthenticated || !accessToken) {
+      setScenarioLoading(false);
       setScenarios([]);
       setSelectedScenario(null);
       return;
@@ -59,6 +66,7 @@ export function AppNavigator() {
 
     let cancelled = false;
     setScenarioError(null);
+    setScenarioLoading(true);
     debugLog('SCENARIO', 'load scenarios start', {
       hasToken: Boolean(accessToken),
     });
@@ -75,7 +83,10 @@ export function AppNavigator() {
           selectedScenarioId: nextScenarios[0]?.id ?? null,
         });
         setScenarios(nextScenarios);
-        setSelectedScenario((current) => current ?? nextScenarios[0]?.id ?? null);
+        setScenarioLoading(false);
+        setSelectedScenario((current) =>
+          current && nextScenarios.some((scenario) => scenario.id === current) ? current : null,
+        );
       })
       .catch((error) => {
         if (cancelled) {
@@ -83,6 +94,7 @@ export function AppNavigator() {
         }
 
         setScenarioError(error instanceof Error ? error.message : '加载场景失败。');
+        setScenarioLoading(false);
         debugLog('SCENARIO', 'load scenarios failed', {
           message: error instanceof Error ? error.message : String(error),
         });
@@ -96,130 +108,86 @@ export function AppNavigator() {
   }, [accessToken, isAuthenticated]);
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
+    <SafeAreaView
+      edges={['top', 'left', 'right']}
+      className="flex-1 bg-background"
+      style={{ backgroundColor: isConversation ? '#06110F' : AppPalette.background, flex: 1 }}
+    >
       {!isAuthenticated ? <LoginScreen /> : null}
       {isAuthenticated ? (
-      <View style={styles.shell}>
-        <View style={styles.content}>
-          {activeTab === 'practice' ? (
-            <ScenarioSelectScreen
-              error={scenarioError}
-              scenarios={scenarios}
-              selectedScenario={selectedScenario}
-              onSelectScenario={setSelectedScenario}
-              onStart={() => {
-                if (currentScenario) {
-                  setActiveTab('conversation');
-                }
-              }}
-            />
-          ) : null}
-          {activeTab === 'conversation' && currentScenario ? (
-            <PracticeScreen
-              scenario={currentScenario}
-              onEnd={(sessionId) => {
-                setLastSessionId(sessionId);
-                setActiveTab('summary');
-              }}
-            />
-          ) : null}
-          {activeTab === 'summary' ? (
-            <SessionSummaryScreen sessionId={lastSessionId} onPracticeAgain={() => setActiveTab('practice')} />
-          ) : null}
-          {activeTab === 'history' ? <HistoryScreen /> : null}
-          {activeTab === 'audio' ? <AudioSpikeScreen /> : null}
-        </View>
+        <View className="flex-1 bg-background" style={{ backgroundColor: isConversation ? '#06110F' : AppPalette.background, flex: 1 }}>
+          <View className="flex-1" style={{ flex: 1 }}>
+            {activeTab === 'practice' ? (
+              <ScenarioSelectScreen
+                error={scenarioError}
+                isLoading={scenarioLoading}
+                scenarios={scenarios}
+                selectedScenario={selectedScenario}
+                onSelectScenario={setSelectedScenario}
+                onStart={() => {
+                  if (currentScenario) {
+                    setActiveTab('conversation');
+                  }
+                }}
+              />
+            ) : null}
+            {activeTab === 'conversation' && currentScenario ? (
+              <PracticeScreen
+                scenario={currentScenario}
+                onEnd={(sessionId) => {
+                  setLastSessionId(sessionId);
+                  setActiveTab('summary');
+                }}
+              />
+            ) : null}
+            {activeTab === 'summary' ? (
+              <SessionSummaryScreen sessionId={lastSessionId} onPracticeAgain={() => setActiveTab('practice')} />
+            ) : null}
+            {activeTab === 'history' ? <HistoryScreen /> : null}
+            {activeTab === 'audio' ? <AudioSpikeScreen /> : null}
+          </View>
 
-        <View
-          style={[
-            styles.tabBar,
-            {
-              height: TAB_BAR_HEIGHT + insets.bottom,
-              paddingBottom: Math.max(insets.bottom, 8),
-            },
-          ]}
-        >
-          {tabs.map((tab) => {
-            const isActive = activeTab === tab.key;
-            return (
-              <Pressable
-                accessibilityRole="button"
-                key={tab.key}
-                onPress={() => setActiveTab(tab.key)}
-                style={styles.tabItem}
+          {isConversation ? null : (
+            <Surface
+              className="absolute bottom-0 left-0 right-0 border-t border-border px-5 pt-3"
+              style={{
+                backgroundColor: '#070B10',
+                borderColor: AppPalette.border,
+                height: TAB_BAR_HEIGHT + insets.bottom,
+                paddingBottom: Math.max(insets.bottom, 8),
+              }}
+            >
+              <Tabs
+                className="w-full"
+                value={navValue}
+                variant="primary"
+                onValueChange={(value) => setActiveTab(value as TabKey)}
               >
-                <View style={[styles.tabIcon, isActive && styles.tabIconActive]}>
-                  <Text style={[styles.tabIconText, isActive && styles.tabIconTextActive]}>{tab.icon}</Text>
-                </View>
-                <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>{tab.label}</Text>
-              </Pressable>
-            );
-          })}
+                <Tabs.List
+                  className="rounded-full border px-1 py-1"
+                  style={{ backgroundColor: '#24262C', borderColor: '#30343B' }}
+                >
+                  <Tabs.Indicator className="rounded-full" style={{ backgroundColor: '#414956' }} />
+                {tabs.map((tab) => {
+                  return (
+                    <Tabs.Trigger className="flex-1 rounded-full px-4 py-2" key={tab.key} value={tab.key}>
+                      {({ isSelected }) => (
+                        <Tabs.Label
+                          className="text-sm font-black"
+                          style={{ color: isSelected ? AppPalette.primary : AppPalette.foreground }}
+                        >
+                          {tab.label}
+                        </Tabs.Label>
+                      )}
+                    </Tabs.Trigger>
+                  );
+                })}
+                </Tabs.List>
+              </Tabs>
+            </Surface>
+          )}
         </View>
-      </View>
       ) : null}
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: AppPalette.page,
-  },
-  shell: {
-    flex: 1,
-    backgroundColor: AppPalette.page,
-  },
-  content: {
-    flex: 1,
-  },
-  tabBar: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.96)',
-    borderColor: AppPalette.line,
-    borderTopWidth: 1,
-    bottom: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    left: 0,
-    paddingHorizontal: 10,
-    paddingTop: 9,
-    position: 'absolute',
-    right: 0,
-  },
-  tabItem: {
-    alignItems: 'center',
-    flex: 1,
-    gap: 5,
-  },
-  tabIcon: {
-    alignItems: 'center',
-    backgroundColor: '#EEF1F5',
-    borderRadius: 10,
-    height: 28,
-    justifyContent: 'center',
-    width: 28,
-  },
-  tabIconActive: {
-    backgroundColor: AppPalette.blueSoft,
-    borderColor: '#BFD2FF',
-    borderWidth: 1,
-  },
-  tabIconText: {
-    color: AppPalette.faint,
-    fontSize: 15,
-    fontWeight: '900',
-  },
-  tabIconTextActive: {
-    color: AppPalette.blue,
-  },
-  tabLabel: {
-    color: AppPalette.muted,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  tabLabelActive: {
-    color: AppPalette.blue,
-  },
-});

@@ -1,7 +1,9 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Button, Chip, Typography } from 'heroui-native';
+import { View } from 'react-native';
 
+import { ElevatedCard, Screen } from '@/components/ui/AppLayout';
 import { AppPalette } from '@/constants/appPalette';
-import { ApiRuntimeConfig } from '@/config/runtime';
+import { useErrorToast } from '@/hooks/useErrorToast';
 import { useAuthStore } from '@/state/authStore';
 
 export function LoginScreen() {
@@ -9,98 +11,43 @@ export function LoginScreen() {
   const login = useAuthStore((state) => state.login);
   const status = useAuthStore((state) => state.status);
   const isLoading = status === 'loading';
+  useErrorToast({ message: error, title: '登录失败' });
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.header}>
-        <Text style={styles.eyebrow}>AI English Partner</Text>
-        <Text style={styles.title}>登录后开始练习</Text>
-        <Text style={styles.subtitle}>使用后端匿名登录创建你的练习身份，随后进入真实场景与实时语音链路。</Text>
-      </View>
+    <Screen bottomInset={0}>
+      <View
+        className="flex-1 justify-center px-5"
+        style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 20 }}
+      >
+        <View className="mb-8 items-center gap-4">
+          <Chip color="accent" size="sm" variant="soft" className="self-center">
+            AI English Partner
+          </Chip>
+          <Typography.Heading
+            className="text-center text-4xl font-black leading-[42px] text-foreground"
+            style={{ color: AppPalette.foreground, fontSize: 34, fontWeight: '900', lineHeight: 42, textAlign: 'center' }}
+          >
+            开口练英语
+          </Typography.Heading>
+          <Typography className="text-center text-base leading-6 text-muted" style={{ color: AppPalette.muted, textAlign: 'center' }}>
+            场景对话，实时字幕，练完复盘。
+          </Typography>
+        </View>
 
-      <View style={styles.panel}>
-        <Text style={styles.panelTitle}>匿名身份</Text>
-        <Text style={styles.panelText}>进入 App 前必须先登录。后端会签发 accessToken 和匿名用户信息。</Text>
-        <Text style={styles.apiText}>API {ApiRuntimeConfig.apiBaseUrl}</Text>
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        <ElevatedCard>
+          <View className="gap-4">
+            <View>
+              <Typography className="text-center text-xl font-black text-foreground" style={{ color: AppPalette.foreground, textAlign: 'center' }}>
+                开始匿名练习
+              </Typography>
+            </View>
 
-        <Pressable disabled={isLoading} onPress={() => void login()} style={styles.primaryButton}>
-          <Text style={styles.primaryButtonText}>{isLoading ? '登录中...' : '匿名登录'}</Text>
-        </Pressable>
+            <Button isDisabled={isLoading} onPress={() => void login()} size="lg" variant="primary">
+              {isLoading ? '登录中...' : '开始练习'}
+            </Button>
+          </View>
+        </ElevatedCard>
       </View>
-    </View>
+    </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    backgroundColor: AppPalette.page,
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  header: {
-    marginBottom: 22,
-  },
-  eyebrow: {
-    color: AppPalette.blue,
-    fontSize: 14,
-    fontWeight: '900',
-    marginBottom: 8,
-  },
-  title: {
-    color: AppPalette.ink,
-    fontSize: 31,
-    fontWeight: '900',
-    lineHeight: 38,
-    marginBottom: 10,
-  },
-  subtitle: {
-    color: AppPalette.muted,
-    fontSize: 16,
-    lineHeight: 23,
-  },
-  panel: {
-    backgroundColor: AppPalette.card,
-    borderColor: AppPalette.line,
-    borderRadius: 20,
-    borderWidth: 1,
-    padding: 18,
-  },
-  panelTitle: {
-    color: AppPalette.ink,
-    fontSize: 20,
-    fontWeight: '900',
-    marginBottom: 8,
-  },
-  panelText: {
-    color: AppPalette.muted,
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 10,
-  },
-  apiText: {
-    color: AppPalette.faint,
-    fontSize: 12,
-    fontWeight: '800',
-    marginBottom: 16,
-  },
-  errorText: {
-    color: AppPalette.red,
-    fontSize: 13,
-    fontWeight: '800',
-    marginBottom: 12,
-  },
-  primaryButton: {
-    alignItems: 'center',
-    backgroundColor: AppPalette.blue,
-    borderRadius: 16,
-    justifyContent: 'center',
-    minHeight: 54,
-  },
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '900',
-  },
-});

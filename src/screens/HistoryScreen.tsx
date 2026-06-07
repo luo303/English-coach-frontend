@@ -1,9 +1,12 @@
+import { SearchField } from 'heroui-native';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView } from 'react-native';
 
 import { fetchPracticeSessions } from '@/clients/practiceSessionClient';
-import { AppPalette } from '@/constants/appPalette';
 import { ScoreTrend } from '@/components/feedback/ScoreTrend';
+import { CardSkeletons, EmptyState, ScreenHeader } from '@/components/ui/AppLayout';
+import { AppPalette } from '@/constants/appPalette';
+import { useErrorToast } from '@/hooks/useErrorToast';
 import { useAuthStore } from '@/state/authStore';
 import { PracticeSessionRecord } from '@/types/api';
 import { HistoryRecord } from '@/types/practice';
@@ -32,18 +35,29 @@ function toHistoryRecord(session: PracticeSessionRecord): HistoryRecord {
 export function HistoryScreen() {
   const accessToken = useAuthStore((state) => state.accessToken);
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [searchValue, setSearchValue] = useState('');
   const [sessions, setSessions] = useState<PracticeSessionRecord[]>([]);
-  const records = useMemo(() => sessions.map(toHistoryRecord), [sessions]);
+  const records = useMemo(() => {
+    const nextRecords = sessions.map(toHistoryRecord);
+    if (!searchValue.trim()) {
+      return nextRecords;
+    }
+    return nextRecords.filter((record) => record.title.toLowerCase().includes(searchValue.trim().toLowerCase()));
+  }, [searchValue, sessions]);
+  useErrorToast({ message: error, title: '历史加载失败' });
 
   useEffect(() => {
     if (!accessToken) {
       setError('请先登录后查看历史会话。');
+      setIsLoading(false);
       setSessions([]);
       return;
     }
 
     let cancelled = false;
     setError(null);
+    setIsLoading(true);
     debugLog('HISTORY', 'load sessions start');
 
     void fetchPracticeSessions(accessToken)
@@ -56,6 +70,7 @@ export function HistoryScreen() {
             totalElements: response.totalElements,
           });
           setSessions(response.content);
+          setIsLoading(false);
         }
       })
       .catch((nextError) => {
@@ -64,6 +79,7 @@ export function HistoryScreen() {
             message: nextError instanceof Error ? nextError.message : String(nextError),
           });
           setError(nextError instanceof Error ? nextError.message : '加载历史会话失败。');
+          setIsLoading(false);
           setSessions([]);
         }
       });
@@ -74,18 +90,32 @@ export function HistoryScreen() {
   }, [accessToken]);
 
   return (
-    <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-      <ScreenTitle eyebrow="训练资产" title="历史复盘" action="≡" />
+    <ScrollView
+      className="bg-background"
+      contentContainerStyle={{ paddingBottom: 112, paddingHorizontal: 20, paddingTop: 20 }}
+      contentContainerClassName="px-5 pt-5 pb-28"
+      showsVerticalScrollIndicator={false}
+      style={{ backgroundColor: AppPalette.background, flex: 1 }}
+    >
+      <ScreenHeader eyebrow="复盘" title="练习记录" subtitle="按场景回看每次对话的分数、时长和轮次。" />
 
-      <View style={styles.filterRow}>
-        <Text style={styles.filterInput}>筛选会议 / 面试 / 点餐</Text>
-        <Pressable style={styles.clearButton}>
-          <Text style={styles.clearButtonText}>清除</Text>
-        </Pressable>
-      </View>
+      <SearchField value={searchValue} onChange={setSearchValue} className="mb-5">
+        <SearchField.Group>
+          <SearchField.SearchIcon />
+          <SearchField.Input placeholder="搜索场景或会话" />
+          <SearchField.ClearButton />
+        </SearchField.Group>
+      </SearchField>
 
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
-      {!error && records.length === 0 ? <Text style={styles.emptyText}>暂无后端历史会话。</Text> : null}
+      {isLoading && sessions.length === 0 ? (
+        <>
+          <EmptyState title="还没有记录" />
+          <CardSkeletons />
+        </>
+      ) : null}
+      {!isLoading && sessions.length > 0 && records.length === 0 ? (
+        <EmptyState title="没有匹配结果" />
+      ) : null}
 
       {records.map((record, index) => (
         <ScoreTrend key={`${record.title}-${index}`} record={record} />
@@ -93,104 +123,3 @@ export function HistoryScreen() {
     </ScrollView>
   );
 }
-
-function ScreenTitle({ eyebrow, title, action }: { eyebrow: string; title: string; action: string }) {
-  return (
-    <View style={styles.header}>
-      <View>
-        <Text style={styles.eyebrow}>{eyebrow}</Text>
-        <Text style={styles.title}>{title}</Text>
-      </View>
-      <Pressable accessibilityRole="button" style={styles.headerAction}>
-        <Text style={styles.headerActionText}>{action}</Text>
-      </Pressable>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  scrollContent: {
-    paddingBottom: 92,
-    paddingHorizontal: 22,
-    paddingTop: 20,
-  },
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 18,
-  },
-  eyebrow: {
-    color: AppPalette.muted,
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 0,
-  },
-  title: {
-    color: AppPalette.ink,
-    fontSize: 28,
-    fontWeight: '900',
-    letterSpacing: 0,
-    lineHeight: 34,
-  },
-  headerAction: {
-    alignItems: 'center',
-    backgroundColor: AppPalette.card,
-    borderColor: AppPalette.line,
-    borderRadius: 12,
-    borderWidth: 1,
-    height: 46,
-    justifyContent: 'center',
-    shadowColor: '#B8C2D6',
-    shadowOffset: { height: 10, width: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 20,
-    width: 46,
-  },
-  headerActionText: {
-    color: AppPalette.ink,
-    fontSize: 19,
-    fontWeight: '900',
-  },
-  filterRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 16,
-  },
-  filterInput: {
-    backgroundColor: AppPalette.card,
-    borderColor: AppPalette.line,
-    borderRadius: 16,
-    borderWidth: 1,
-    color: AppPalette.muted,
-    flex: 1,
-    fontSize: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-  },
-  clearButton: {
-    alignItems: 'center',
-    backgroundColor: AppPalette.card,
-    borderColor: AppPalette.line,
-    borderRadius: 16,
-    borderWidth: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-  },
-  clearButtonText: {
-    color: AppPalette.ink,
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  emptyText: {
-    color: AppPalette.muted,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  errorText: {
-    color: AppPalette.red,
-    fontSize: 14,
-    fontWeight: '800',
-    marginBottom: 12,
-  },
-});

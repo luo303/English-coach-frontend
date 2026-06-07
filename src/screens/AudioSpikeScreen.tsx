@@ -1,5 +1,6 @@
+import { Button, Card, Typography as Text } from 'heroui-native';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { AudioManager } from 'react-native-audio-api';
 
 import { AudioApiRealtimePlayer, PlayerSpikeStats } from '@/audio/player';
@@ -15,7 +16,9 @@ import {
   RealtimeAudioInputFrame,
   RecorderSpikeStats,
 } from '@/audio/recorder';
+import { MetricCard, ScreenHeader } from '@/components/ui/AppLayout';
 import { AppPalette } from '@/constants/appPalette';
+import { useErrorToast } from '@/hooks/useErrorToast';
 
 function createToneBase64(sampleRate: number, durationMs: number) {
   const sampleCount = Math.round((sampleRate * durationMs) / 1000);
@@ -44,6 +47,7 @@ export function AudioSpikeScreen() {
   const [recorderStatus, setRecorderStatus] = useState('idle');
   const [playerStats, setPlayerStats] = useState<PlayerSpikeStats>(playerRef.current.getStats());
   const [recorderStats, setRecorderStats] = useState<RecorderSpikeStats>(recorderRef.current.getStats());
+  useErrorToast({ message: error, title: '音频链路异常' });
 
   useEffect(() => {
     const player = playerRef.current;
@@ -163,198 +167,82 @@ export function AudioSpikeScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-      <View style={styles.header}>
-        <Text style={styles.eyebrow}>Realtime audio spike</Text>
-        <Text style={styles.title}>音频链路</Text>
-      </View>
+    <ScrollView
+      className="bg-background"
+      contentContainerStyle={{ paddingBottom: 112, paddingHorizontal: 20, paddingTop: 20 }}
+      contentContainerClassName="px-5 pt-5 pb-28"
+      showsVerticalScrollIndicator={false}
+      style={{ backgroundColor: AppPalette.background, flex: 1 }}
+    >
+      <ScreenHeader eyebrow="调试" title="音频链路" subtitle="验证录音、播放和 PCM16 转换是否能在真机链路中稳定工作。" />
 
-      <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Recorder</Text>
-        <View style={styles.buttonRow}>
-          <Pressable disabled={isRecording} onPress={startRecording} style={styles.primaryButton}>
-            <Text style={styles.primaryButtonText}>开始录音</Text>
-          </Pressable>
-          <Pressable disabled={!isRecording} onPress={stopRecording} style={styles.secondaryButton}>
-            <Text style={styles.secondaryButtonText}>停止</Text>
-          </Pressable>
-        </View>
+      <Card className="mb-4 border border-border bg-surface p-4" style={{ borderColor: AppPalette.border, borderRadius: 18 }}>
+        <Card.Body className="gap-4">
+          <Text className="text-lg font-black text-foreground">Recorder</Text>
+          <View className="flex-row gap-3">
+            <Button className="flex-1" isDisabled={isRecording} onPress={startRecording} variant="primary">
+              开始录音
+            </Button>
+            <Button className="flex-1" isDisabled={!isRecording} onPress={stopRecording} variant="secondary">
+              停止
+            </Button>
+          </View>
+          <View className="flex-row flex-wrap gap-3">
+            <MetricCard label="请求采样率" value={`${recorderStats.requestedSampleRate}`} />
+            <MetricCard label="实际采样率" value={`${recorderStats.actualSampleRate ?? '-'}`} />
+            <MetricCard label="请求样本" value={`${recorderStats.requestedBufferLength}`} />
+            <MetricCard label="实际 chunk" value={`${recorderStats.actualChunkMs ?? '-'}ms`} />
+            <MetricCard label="帧数" value={`${recorderStats.framesReceived}`} />
+            <MetricCard label="音量" value={`${lastFrame?.level ?? recorderStats.lastLevel}`} />
+          </View>
+          <Text className="text-sm font-semibold text-muted">状态：{recorderStatus}</Text>
+        </Card.Body>
+      </Card>
 
-        <View style={styles.statGrid}>
-          <Stat label="请求采样率" value={`${recorderStats.requestedSampleRate}`} />
-          <Stat label="实际采样率" value={`${recorderStats.actualSampleRate ?? '-'}`} />
-          <Stat label="请求样本" value={`${recorderStats.requestedBufferLength}`} />
-          <Stat label="实际 chunk" value={`${recorderStats.actualChunkMs ?? '-'}ms`} />
-          <Stat label="帧数" value={`${recorderStats.framesReceived}`} />
-          <Stat label="音量" value={`${lastFrame?.level ?? recorderStats.lastLevel}`} />
-          <Stat label="状态" value={recorderStatus} />
-        </View>
-      </View>
+      <Card className="mb-4 border border-border bg-surface p-4" style={{ borderColor: AppPalette.border, borderRadius: 18 }}>
+        <Card.Body className="gap-4">
+          <Text className="text-lg font-black text-foreground">Player</Text>
+          <View className="flex-row gap-3">
+            <Button className="flex-1" onPress={playTone} variant="primary">
+              队列播放
+            </Button>
+            <Button className="flex-1" onPress={playSourceTone} variant="secondary">
+              Source 测试
+            </Button>
+          </View>
+          <View className="flex-row gap-3">
+            <Button className="flex-1" onPress={playRecentRecording} variant="primary">
+              播放录音
+            </Button>
+            <Button className="flex-1" onPress={clearPlayer} variant="secondary">
+              清空队列
+            </Button>
+          </View>
+          <Button onPress={() => void playerRef.current.close()} variant="outline">
+            关闭音频
+          </Button>
+          <View className="flex-row flex-wrap gap-3">
+            <MetricCard label="入队片段" value={`${playerStats.enqueuedBuffers}`} />
+            <MetricCard label="采样率" value={`${playerStats.sampleRate ?? '-'}`} />
+            <MetricCard label="片段时长" value={`${playerStats.lastBufferDurationMs ?? '-'}ms`} />
+            <MetricCard label="输出格式" value="PCM16" />
+          </View>
+          <Text className="text-sm font-semibold text-muted">状态：{playerStatus}</Text>
+        </Card.Body>
+      </Card>
 
-      <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Player</Text>
-        <View style={styles.buttonRow}>
-          <Pressable onPress={playTone} style={styles.primaryButton}>
-            <Text style={styles.primaryButtonText}>队列播放</Text>
-          </Pressable>
-          <Pressable onPress={playSourceTone} style={styles.secondaryButton}>
-            <Text style={styles.secondaryButtonText}>Source 测试</Text>
-          </Pressable>
-        </View>
-        <View style={styles.buttonRow}>
-          <Pressable onPress={playRecentRecording} style={styles.primaryButton}>
-            <Text style={styles.primaryButtonText}>播放录音</Text>
-          </Pressable>
-          <Pressable onPress={clearPlayer} style={styles.secondaryButton}>
-            <Text style={styles.secondaryButtonText}>清队列</Text>
-          </Pressable>
-        </View>
-        <View style={styles.buttonRow}>
-          <Pressable onPress={() => void playerRef.current.close()} style={styles.secondaryButton}>
-            <Text style={styles.secondaryButtonText}>关闭音频</Text>
-          </Pressable>
-        </View>
+      <Card className="mb-4 border border-border bg-surface-secondary p-4" style={{ borderColor: AppPalette.border, borderRadius: 18 }}>
+        <Card.Body className="gap-2">
+          <Text className="text-lg font-black text-foreground">Spike 结论</Text>
+          <Text className="text-sm leading-5 text-muted">
+            需要使用 Development Build 和真机验证。Expo Go 或 Web 可能无法加载原生音频模块。
+          </Text>
+          <Text className="text-sm leading-5 text-muted">
+            当前项目仍存在 worklets peer 风险：audio-api 要求大于等于 0.6.0，当前为 0.5.1。
+          </Text>
+        </Card.Body>
+      </Card>
 
-        <View style={styles.statGrid}>
-          <Stat label="入队片段" value={`${playerStats.enqueuedBuffers}`} />
-          <Stat label="采样率" value={`${playerStats.sampleRate ?? '-'}`} />
-          <Stat label="片段时长" value={`${playerStats.lastBufferDurationMs ?? '-'}ms`} />
-          <Stat label="输出格式" value="PCM16" />
-          <Stat label="状态" value={playerStatus} />
-        </View>
-      </View>
-
-      <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Spike verdict</Text>
-        <Text style={styles.noteText}>需要 Development Build 真机验证；Expo Go 或 Web 可能无法加载原生模块。</Text>
-        <Text style={styles.noteText}>当前项目存在 worklets peer 风险：audio-api 要求 &gt;= 0.6.0，Expo/Reanimated 当前为 0.5.1。</Text>
-      </View>
-
-      {error ? (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : null}
     </ScrollView>
   );
 }
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.statCard}>
-      <Text style={styles.statLabel}>{label}</Text>
-      <Text style={styles.statValue}>{value}</Text>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  scrollContent: {
-    paddingBottom: 92,
-    paddingHorizontal: 22,
-    paddingTop: 20,
-  },
-  header: {
-    marginBottom: 18,
-  },
-  eyebrow: {
-    color: AppPalette.muted,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  title: {
-    color: AppPalette.ink,
-    fontSize: 28,
-    fontWeight: '900',
-    lineHeight: 34,
-  },
-  panel: {
-    backgroundColor: AppPalette.card,
-    borderColor: AppPalette.line,
-    borderRadius: 16,
-    borderWidth: 1,
-    marginBottom: 14,
-    padding: 16,
-  },
-  panelTitle: {
-    color: AppPalette.ink,
-    fontSize: 18,
-    fontWeight: '900',
-    marginBottom: 12,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 14,
-  },
-  primaryButton: {
-    alignItems: 'center',
-    backgroundColor: AppPalette.blue,
-    borderRadius: 14,
-    flex: 1,
-    justifyContent: 'center',
-    minHeight: 48,
-  },
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '900',
-  },
-  secondaryButton: {
-    alignItems: 'center',
-    backgroundColor: AppPalette.blueSoft,
-    borderColor: '#BFD2FF',
-    borderRadius: 14,
-    borderWidth: 1,
-    flex: 1,
-    justifyContent: 'center',
-    minHeight: 48,
-  },
-  secondaryButtonText: {
-    color: AppPalette.blue,
-    fontSize: 15,
-    fontWeight: '900',
-  },
-  statGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  statCard: {
-    backgroundColor: AppPalette.page,
-    borderColor: AppPalette.line,
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 12,
-    width: '47%',
-  },
-  statLabel: {
-    color: AppPalette.muted,
-    fontSize: 12,
-    fontWeight: '800',
-    marginBottom: 5,
-  },
-  statValue: {
-    color: AppPalette.ink,
-    fontSize: 17,
-    fontWeight: '900',
-  },
-  noteText: {
-    color: AppPalette.muted,
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 6,
-  },
-  errorBox: {
-    backgroundColor: '#FFF1F1',
-    borderColor: '#FFD1D1',
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 14,
-  },
-  errorText: {
-    color: AppPalette.red,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-});

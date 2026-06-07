@@ -1,7 +1,8 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Card, Chip, Typography } from 'heroui-native';
+import { View } from 'react-native';
 
-import { AppPalette } from '@/constants/appPalette';
 import { AudioLevelMeter } from '@/components/practice/AudioLevelMeter';
+import { AppPalette } from '@/constants/appPalette';
 import { PracticeSessionState } from '@/types/realtime';
 
 type SpeakingStatusProps = {
@@ -11,17 +12,17 @@ type SpeakingStatusProps = {
 };
 
 const statusCopy: Record<PracticeSessionState, string> = {
-  assistant_speaking: 'AI 正在回应 · 可随时打断',
-  assistant_thinking: 'AI 正在组织追问',
-  connecting: '正在连接实时通道',
-  ending: '正在结束会话',
-  error: '实时通道异常',
-  idle: '准备开始',
-  interrupting: '已打断 AI · 等待你继续',
-  listening: '请继续说 · 停顿后 AI 接话',
-  report_generating: '正在生成课后报告',
-  summary_ready: '课后报告已生成',
-  user_speaking: '实时转写中 · 保持自然表达',
+  assistant_speaking: 'AI 回应中',
+  assistant_thinking: '思考中',
+  connecting: '连接中',
+  ending: '收尾中',
+  error: '连接异常',
+  idle: '准备中',
+  interrupting: '已打断',
+  listening: '正在听',
+  report_generating: '生成报告',
+  summary_ready: '报告完成',
+  user_speaking: '转写中',
 };
 
 export function SpeakingStatus({ elapsedSec, level, status }: SpeakingStatusProps) {
@@ -29,63 +30,28 @@ export function SpeakingStatus({ elapsedSec, level, status }: SpeakingStatusProp
     .toString()
     .padStart(2, '0');
   const seconds = (elapsedSec % 60).toString().padStart(2, '0');
+  const isActive = status === 'user_speaking' || status === 'assistant_speaking';
 
   return (
-    <View style={styles.micPanel}>
-      <View style={[styles.waveRing, status === 'user_speaking' && styles.waveRingActive]}>
-        <View style={styles.waveDot} />
-      </View>
-      <AudioLevelMeter level={level} />
-      <Text style={styles.micStatus}>{statusCopy[status]}</Text>
-      <Text style={styles.timer}>{minutes}:{seconds}</Text>
-    </View>
+    <Card
+      className="border border-border bg-surface p-5 shadow-surface"
+      style={{ backgroundColor: AppPalette.surface, borderColor: AppPalette.border, borderRadius: 28 }}
+    >
+      <Card.Body className="items-center gap-4">
+        <View
+          className="h-32 w-32 items-center justify-center rounded-full"
+          style={{ backgroundColor: isActive ? AppPalette.primary : AppPalette.surfaceSoft, borderRadius: 999 }}
+        >
+          <View style={{ backgroundColor: '#FFFFFF', borderRadius: 999, height: 14, width: 14 }} />
+        </View>
+        <AudioLevelMeter level={level} />
+        <View className="flex-row items-center gap-3">
+          <Chip color={isActive ? 'accent' : 'default'} variant="soft">
+            {statusCopy[status]}
+          </Chip>
+          <Typography.Code>{minutes}:{seconds}</Typography.Code>
+        </View>
+      </Card.Body>
+    </Card>
   );
 }
-
-const styles = StyleSheet.create({
-  micPanel: {
-    alignItems: 'center',
-    backgroundColor: AppPalette.card,
-    borderColor: AppPalette.line,
-    borderRadius: 22,
-    borderWidth: 1,
-    minHeight: 260,
-    padding: 22,
-  },
-  waveRing: {
-    alignItems: 'center',
-    backgroundColor: AppPalette.blue,
-    borderColor: AppPalette.blueSoft,
-    borderRadius: 64,
-    borderWidth: 10,
-    height: 118,
-    justifyContent: 'center',
-    marginBottom: 18,
-    width: 118,
-  },
-  waveRingActive: {
-    shadowColor: AppPalette.blue,
-    shadowOffset: { height: 12, width: 0 },
-    shadowOpacity: 0.22,
-    shadowRadius: 18,
-  },
-  waveDot: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 7,
-    height: 14,
-    width: 14,
-  },
-  micStatus: {
-    color: AppPalette.ink,
-    fontSize: 16,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  timer: {
-    color: AppPalette.muted,
-    fontFamily: 'monospace',
-    fontSize: 14,
-    fontWeight: '900',
-    marginTop: 8,
-  },
-});

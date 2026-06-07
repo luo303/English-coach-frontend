@@ -1,11 +1,14 @@
+import { Button, Card, Skeleton, Typography as Text } from 'heroui-native';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 
 import { fetchPracticeSession, fetchPracticeSessionTurns } from '@/clients/practiceSessionClient';
 import { fetchReport } from '@/clients/reportClient';
-import { AppPalette } from '@/constants/appPalette';
 import { AbilityRadar } from '@/components/feedback/AbilityRadar';
 import { SummaryCard } from '@/components/feedback/SummaryCard';
+import { MetricCard, ScreenHeader } from '@/components/ui/AppLayout';
+import { AppPalette } from '@/constants/appPalette';
+import { useErrorToast } from '@/hooks/useErrorToast';
 import { useAuthStore } from '@/state/authStore';
 import { PracticeSessionRecord, PracticeSessionTurnRecord, ReportRecord } from '@/types/api';
 import { Metric } from '@/types/practice';
@@ -35,16 +38,18 @@ function reportMetrics(report: ReportRecord | null): Metric[] {
     { label: '发音清晰度', value: Math.round(report.scores.pronunciation) },
     { label: '语法准确度', value: Math.round(report.scores.grammar) },
     { label: '词汇掌握度', value: Math.round(report.scores.vocabulary) },
-    { label: '流利度', value: Math.round(report.scores.fluency) },
+    { label: '表达流利度', value: Math.round(report.scores.fluency) },
   ];
 }
 
 export function SessionSummaryScreen({ onPracticeAgain, sessionId }: SessionSummaryScreenProps) {
   const accessToken = useAuthStore((state) => state.accessToken);
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [report, setReport] = useState<ReportRecord | null>(null);
   const [session, setSession] = useState<PracticeSessionRecord | null>(null);
   const [turns, setTurns] = useState<PracticeSessionTurnRecord[]>([]);
+  useErrorToast({ message: error, title: '报告加载失败' });
   const metrics = useMemo(() => reportMetrics(report), [report]);
   const kpis = useMemo(() => {
     return [
@@ -62,6 +67,7 @@ export function SessionSummaryScreen({ onPracticeAgain, sessionId }: SessionSumm
   useEffect(() => {
     if (!accessToken || !sessionId) {
       setError('暂无可查询的真实会话报告。');
+      setIsLoading(false);
       setReport(null);
       setSession(null);
       setTurns([]);
@@ -70,9 +76,8 @@ export function SessionSummaryScreen({ onPracticeAgain, sessionId }: SessionSumm
 
     let cancelled = false;
     setError(null);
-    debugLog('REPORT', 'load report bundle start', {
-      sessionId,
-    });
+    setIsLoading(true);
+    debugLog('REPORT', 'load report bundle start', { sessionId });
 
     void Promise.all([
       fetchReport(accessToken, sessionId),
@@ -87,6 +92,7 @@ export function SessionSummaryScreen({ onPracticeAgain, sessionId }: SessionSumm
         setReport(nextReport);
         setSession(nextSession);
         setTurns(nextTurns);
+        setIsLoading(false);
         debugLog('REPORT', 'load report bundle success', {
           mistakeCount: nextReport.mistakes?.length ?? 0,
           score: nextReport.overallScore,
@@ -104,6 +110,7 @@ export function SessionSummaryScreen({ onPracticeAgain, sessionId }: SessionSumm
           sessionId,
         });
         setError(nextError instanceof Error ? nextError.message : '加载报告失败。');
+        setIsLoading(false);
         setReport(null);
         setSession(null);
         setTurns([]);
@@ -115,170 +122,113 @@ export function SessionSummaryScreen({ onPracticeAgain, sessionId }: SessionSumm
   }, [accessToken, sessionId]);
 
   return (
-    <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-      <ScreenTitle eyebrow={session?.scenarioId ?? '真实会话'} title="能力报告" action="↗" />
+    <ScrollView
+      className="bg-background"
+      contentContainerStyle={{ paddingBottom: 112, paddingHorizontal: 20, paddingTop: 20 }}
+      contentContainerClassName="px-5 pt-5 pb-28"
+      showsVerticalScrollIndicator={false}
+      style={{ backgroundColor: AppPalette.background, flex: 1 }}
+    >
+      <ScreenHeader
+        action="报告"
+        eyebrow={session?.scenarioId ?? '真实会话'}
+        title="本次表现"
+        subtitle="先看总分和关键指标，再决定下一次重点练什么。"
+      />
 
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
-      {!error && !report ? <Text style={styles.emptyText}>正在从后端加载报告...</Text> : null}
+      {isLoading && !report ? <ReportSkeleton /> : null}
 
       {report ? (
-        <SummaryCard
-          score={report.overallScore}
-          summary={report.suggestions?.join(' / ') || `${report.scenarioName} 完成 ${report.turnCount} 轮练习。`}
-          title={report.scenarioName}
-        />
-      ) : null}
+        <>
+          <SummaryCard
+            score={report.overallScore}
+            summary={report.suggestions?.join(' / ') || `${report.scenarioName} 完成 ${report.turnCount} 轮练习。`}
+            title={report.scenarioName}
+          />
 
-      <View style={styles.kpiGrid}>
-        {kpis.map((item) => (
-          <View key={item.label} style={styles.kpiCard}>
-            <Text style={styles.kpiLabel}>{item.label}</Text>
-            <Text style={styles.kpiValue}>{item.value}</Text>
+          <View className="mb-4 flex-row flex-wrap gap-3">
+            {kpis.map((item) => (
+              <MetricCard key={item.label} label={item.label} value={item.value} />
+            ))}
           </View>
-        ))}
-      </View>
 
-      <AbilityRadar metrics={metrics} />
+          <AbilityRadar metrics={metrics} />
 
-      <View style={styles.nextCard}>
-        <Text style={styles.nextTitle}>下一次建议</Text>
-        <Text style={styles.nextText}>{nextSuggestion}</Text>
-      </View>
+          <Card className="border border-border bg-success-soft p-4" style={{ borderColor: AppPalette.border, borderRadius: 18 }}>
+            <Card.Body className="gap-2">
+              <Text className="text-lg font-black text-foreground">下一次建议</Text>
+              <Text className="text-base leading-6 text-foreground">{nextSuggestion}</Text>
+            </Card.Body>
+          </Card>
 
-      <Pressable onPress={onPracticeAgain} style={styles.primaryButton}>
-        <Text style={styles.primaryButtonText}>重新练习</Text>
-      </Pressable>
+          <Button className="mt-5" onPress={onPracticeAgain} size="lg" variant="primary">
+            重新练习
+          </Button>
+        </>
+      ) : null}
     </ScrollView>
   );
 }
 
-function ScreenTitle({ eyebrow, title, action }: { eyebrow: string; title: string; action: string }) {
+function ReportSkeleton() {
   return (
-    <View style={styles.header}>
-      <View>
-        <Text style={styles.eyebrow}>{eyebrow}</Text>
-        <Text style={styles.title}>{title}</Text>
+    <>
+      <Card
+        className="mb-4 border border-border bg-surface p-5"
+        style={{ backgroundColor: AppPalette.surface, borderColor: AppPalette.border, borderRadius: 18 }}
+      >
+        <Card.Body className="gap-4">
+          <View className="flex-row items-center gap-4">
+            <Skeleton className="h-20 w-20 rounded-2xl" />
+            <View className="flex-1">
+              <Skeleton className="mb-2 h-7 w-24 rounded-full" />
+              <Skeleton className="h-7 w-44 rounded-lg" />
+            </View>
+          </View>
+          <Skeleton className="h-5 w-full rounded-lg" />
+          <Skeleton className="h-5 w-4/5 rounded-lg" />
+        </Card.Body>
+      </Card>
+
+      <View className="mb-4 flex-row flex-wrap gap-3">
+        {['平均延迟', '有效轮次', '练习时长', '问题数量'].map((label) => (
+          <Card
+            className="w-[48%] border border-border bg-surface p-4"
+            key={label}
+            style={{ backgroundColor: AppPalette.surface, borderColor: AppPalette.border, borderRadius: 18 }}
+          >
+            <Skeleton className="mb-3 h-4 w-20 rounded-md" />
+            <Skeleton className="h-8 w-16 rounded-lg" />
+          </Card>
+        ))}
       </View>
-      <Pressable accessibilityRole="button" style={styles.headerAction}>
-        <Text style={styles.headerActionText}>{action}</Text>
-      </Pressable>
-    </View>
+
+      <Card className="mb-4 border border-border bg-surface p-4">
+        <Card.Body className="gap-4">
+          <Skeleton className="h-6 w-24 rounded-lg" />
+          {[0, 1, 2, 3].map((item) => (
+            <View className="gap-2" key={item}>
+              <View className="flex-row items-center justify-between">
+                <Skeleton className="h-5 w-24 rounded-md" />
+                <Skeleton className="h-5 w-8 rounded-md" />
+              </View>
+              <View className="h-2.5 overflow-hidden rounded-full bg-surface-tertiary">
+                <Skeleton className="h-full w-full rounded-full" />
+              </View>
+            </View>
+          ))}
+        </Card.Body>
+      </Card>
+
+      <Card className="border border-border bg-success-soft p-4" style={{ borderColor: AppPalette.border, borderRadius: 18 }}>
+        <Card.Body className="gap-2">
+          <Skeleton className="h-6 w-24 rounded-lg" />
+          <Skeleton className="h-5 w-full rounded-lg" />
+          <Skeleton className="h-5 w-5/6 rounded-lg" />
+        </Card.Body>
+      </Card>
+
+      <Skeleton className="mt-5 h-12 w-full rounded-full" />
+    </>
   );
 }
-
-const styles = StyleSheet.create({
-  scrollContent: {
-    paddingBottom: 92,
-    paddingHorizontal: 22,
-    paddingTop: 20,
-  },
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 18,
-  },
-  eyebrow: {
-    color: AppPalette.muted,
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 0,
-  },
-  title: {
-    color: AppPalette.ink,
-    fontSize: 28,
-    fontWeight: '900',
-    letterSpacing: 0,
-    lineHeight: 34,
-  },
-  headerAction: {
-    alignItems: 'center',
-    backgroundColor: AppPalette.card,
-    borderColor: AppPalette.line,
-    borderRadius: 12,
-    borderWidth: 1,
-    height: 46,
-    justifyContent: 'center',
-    shadowColor: '#B8C2D6',
-    shadowOffset: { height: 10, width: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 20,
-    width: 46,
-  },
-  headerActionText: {
-    color: AppPalette.ink,
-    fontSize: 19,
-    fontWeight: '900',
-  },
-  kpiGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 16,
-  },
-  kpiCard: {
-    backgroundColor: AppPalette.card,
-    borderColor: AppPalette.line,
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 15,
-    width: '48%',
-  },
-  kpiLabel: {
-    color: AppPalette.muted,
-    fontSize: 14,
-    marginBottom: 8,
-  },
-  kpiValue: {
-    color: AppPalette.ink,
-    fontSize: 22,
-    fontWeight: '900',
-  },
-  emptyText: {
-    color: AppPalette.muted,
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  errorText: {
-    color: AppPalette.red,
-    fontSize: 14,
-    fontWeight: '800',
-    marginBottom: 12,
-  },
-  nextCard: {
-    backgroundColor: AppPalette.greenSoft,
-    borderColor: '#BCE7CC',
-    borderRadius: 18,
-    borderWidth: 1,
-    padding: 16,
-  },
-  nextTitle: {
-    color: AppPalette.ink,
-    fontSize: 17,
-    fontWeight: '900',
-    marginBottom: 8,
-  },
-  nextText: {
-    color: AppPalette.ink,
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  primaryButton: {
-    alignItems: 'center',
-    backgroundColor: AppPalette.blue,
-    borderRadius: 16,
-    justifyContent: 'center',
-    marginTop: 18,
-    minHeight: 56,
-    shadowColor: AppPalette.blue,
-    shadowOffset: { height: 14, width: 0 },
-    shadowOpacity: 0.24,
-    shadowRadius: 24,
-  },
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '900',
-  },
-});

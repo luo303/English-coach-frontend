@@ -27,5 +27,4 @@ export type HistoryRecord = {
 export type TabItem = {
   key: TabKey;
   label: string;
-  icon: string;
 };

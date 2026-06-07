@@ -1,15 +1,17 @@
 import { useEffect, useRef } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { MutableRefObject } from 'react';
+import { StatusBar } from 'expo-status-bar';
+import { Chip, Surface, Typography } from 'heroui-native';
+import { View } from 'react-native';
 
 import { AudioApiRealtimePlayer } from '@/audio/player';
 import { AudioApiRealtimeRecorder } from '@/audio/recorder';
 import { createPracticeSession, endPracticeSession } from '@/clients/practiceSessionClient';
 import { RealtimeClient } from '@/clients/realtimeClient';
-import { AppPalette } from '@/constants/appPalette';
-import { ApiRuntimeConfig } from '@/config/runtime';
 import { RealtimeControls } from '@/components/practice/RealtimeControls';
-import { SpeakingStatus } from '@/components/practice/SpeakingStatus';
 import { TranscriptPanel } from '@/components/practice/TranscriptPanel';
+import { AppPalette } from '@/constants/appPalette';
+import { useErrorToast } from '@/hooks/useErrorToast';
 import { useAuthStore } from '@/state/authStore';
 import { useSessionStore } from '@/state/sessionStore';
 import { Scenario } from '@/types/practice';
@@ -35,13 +37,21 @@ const statusLabel: Record<PracticeSessionState, string> = {
   user_speaking: '用户说话',
 };
 
+const callRoom = {
+  background: '#06110F',
+  border: '#21342F',
+  ink: '#F4FBF8',
+  muted: '#9FB8B0',
+  panel: '#0B1714',
+  panelSoft: '#10211D',
+};
+
 export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
-  const audioLevel = useSessionStore((state) => state.audioLevel);
   const dispatchRealtimeEvent = useSessionStore((state) => state.dispatchRealtimeEvent);
-  const elapsedSec = useSessionStore((state) => state.elapsedSec);
   const hints = useSessionStore((state) => state.hints);
   const latencyMs = useSessionStore((state) => state.latencyMs);
   const connectionStatus = useSessionStore((state) => state.connectionStatus);
+  const latestSystemHint = hints.find((hint) => hint.type === 'system') ?? null;
   const partialTurn = useSessionStore((state) => state.partialTurn);
   const playbackQueue = useSessionStore((state) => state.playbackQueue);
   const score = useSessionStore((state) => state.score);
@@ -59,6 +69,7 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
   const timerRefs = useRef<ReturnType<typeof setTimeout>[]>([]);
   const intervalRefs = useRef<ReturnType<typeof setInterval>[]>([]);
   const lastAudioFrameLogAtRef = useRef(0);
+  useErrorToast({ message: latestSystemHint?.message, title: latestSystemHint?.title ?? '实时链路异常' });
 
   useEffect(() => {
     statusRef.current = status;
@@ -136,16 +147,12 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
     });
 
     dispatchRealtimeEvent({
-      payload: {
-        scenario,
-      },
+      payload: { scenario },
       type: 'local.prepare_session',
     });
 
     const elapsedTimer = setInterval(() => {
-      dispatchRealtimeEvent({
-        type: 'local.tick',
-      });
+      dispatchRealtimeEvent({ type: 'local.tick' });
     }, 1000);
     intervalRefs.current.push(elapsedTimer);
 
@@ -155,22 +162,13 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
         payload: {
           recoverable: false,
           code: 'missing_access_token',
-          message: '请先完成真实登录，再进入实时练习。',
+          message: '请先完成登录，再进入实时练习。',
         },
         type: 'local.error',
       });
       return () => {
         cancelled = true;
-        intervalRefs.current.forEach(clearInterval);
-        intervalRefs.current = [];
-        timerRefs.current.forEach(clearTimeout);
-        timerRefs.current = [];
-        void recorderRef.current?.stop();
-        recorderRef.current = null;
-        void playerRef.current?.close();
-        playerRef.current = null;
-        realtimeClientRef.current?.close();
-        realtimeClientRef.current = null;
+        cleanupRealtimeResources(intervalRefs, timerRefs, recorderRef, playerRef, realtimeClientRef);
       };
     }
 
@@ -207,87 +205,85 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
 
         const client = new RealtimeClient({
           onEvent: dispatchRealtimeEvent,
-          onStatusChange: (connectionStatus) => {
+          onStatusChange: (nextConnectionStatus) => {
             debugLog('PRACTICE', 'connection status', {
-              connectionStatus,
+              connectionStatus: nextConnectionStatus,
               sessionId: session.sessionId,
             });
             dispatchRealtimeEvent({
-              payload: {
-                status: connectionStatus,
-              },
+              payload: { status: nextConnectionStatus },
               type: 'local.connection_status',
             });
 
-            if (connectionStatus === 'connected' && !recorderRef.current) {
+            if (nextConnectionStatus === 'connected' && !recorderRef.current) {
               const recorder = new AudioApiRealtimeRecorder();
               recorderRef.current = recorder;
               debugLog('AUDIO', 'recorder start requested', {
                 sessionId: session.sessionId,
               });
-              void recorder.start((frame) => {
-                const activeSessionId = activeSessionIdRef.current;
+              void recorder
+                .start((frame) => {
+                  const activeSessionId = activeSessionIdRef.current;
 
-                dispatchRealtimeEvent({
-                  payload: {
-                    level: frame.level,
-                  },
-                  type: 'local.audio_level',
-                });
+                  dispatchRealtimeEvent({
+                    payload: { level: frame.level },
+                    type: 'local.audio_level',
+                  });
 
-                if (!activeSessionId) {
-                  return;
-                }
+                  if (!activeSessionId) {
+                    return;
+                  }
 
-                if (statusRef.current === 'assistant_speaking') {
+                  if (statusRef.current === 'assistant_speaking') {
+                    const now = Date.now();
+                    if (now - lastAudioFrameLogAtRef.current > 2000) {
+                      lastAudioFrameLogAtRef.current = now;
+                      debugLog('AUDIO', 'skip mic frame while assistant speaking', {
+                        level: frame.level,
+                        sampleRate: frame.sampleRate,
+                        sessionId: activeSessionId,
+                      });
+                    }
+                    return;
+                  }
+
+                  audioSeqRef.current += 1;
                   const now = Date.now();
                   if (now - lastAudioFrameLogAtRef.current > 2000) {
                     lastAudioFrameLogAtRef.current = now;
-                    debugLog('AUDIO', 'skip mic frame while assistant speaking', {
+                    debugLog('AUDIO', 'capturing pcm frames', {
+                      audioBase64Length: frame.audioBase64.length,
                       level: frame.level,
                       sampleRate: frame.sampleRate,
+                      seq: audioSeqRef.current,
                       sessionId: activeSessionId,
                     });
                   }
-                  return;
-                }
-
-                audioSeqRef.current += 1;
-                const now = Date.now();
-                if (now - lastAudioFrameLogAtRef.current > 2000) {
-                  lastAudioFrameLogAtRef.current = now;
-                  debugLog('AUDIO', 'capturing pcm frames', {
-                    audioBase64Length: frame.audioBase64.length,
-                    level: frame.level,
-                    sampleRate: frame.sampleRate,
-                    seq: audioSeqRef.current,
-                    sessionId: activeSessionId,
+                  realtimeClientRef.current?.send({
+                    payload: {
+                      data: frame.audioBase64,
+                      format: 'pcm16',
+                      sampleRate: 16000,
+                      turnClientId: `${activeSessionId}-${audioSeqRef.current}`,
+                    },
+                    type: 'audio_chunk',
                   });
-                }
-                realtimeClientRef.current?.send({
-                  payload: {
-                    data: frame.audioBase64,
-                    format: 'pcm16',
-                    sampleRate: 16000,
-                    turnClientId: `${activeSessionId}-${audioSeqRef.current}`,
-                  },
-                  type: 'audio_chunk',
+                })
+                .catch((error) => {
+                  recorderRef.current = null;
+                  debugLog('AUDIO', 'recorder start failed', {
+                    message: error instanceof Error ? error.message : String(error),
+                    sessionId: session.sessionId,
+                  });
+                  dispatchRealtimeEvent({
+                    payload: {
+                      code: 'microphone_start_failed',
+                      message: error instanceof Error ? error.message : '无法启动麦克风。',
+                      recoverable: false,
+                    },
+                    type: 'local.error',
+                  });
                 });
-              }).catch((error) => {
-                recorderRef.current = null;
-                debugLog('AUDIO', 'recorder start failed', {
-                  message: error instanceof Error ? error.message : String(error),
-                  sessionId: session.sessionId,
-                });
-                dispatchRealtimeEvent({
-                  payload: {
-                    code: 'microphone_start_failed',
-                    message: error instanceof Error ? error.message : '无法启动麦克风。',
-                    recoverable: false,
-                  },
-                  type: 'local.error',
-                });
-              });
             }
           },
           sessionId: session.sessionId,
@@ -329,16 +325,7 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
 
     return () => {
       cancelled = true;
-      intervalRefs.current.forEach(clearInterval);
-      intervalRefs.current = [];
-      timerRefs.current.forEach(clearTimeout);
-      timerRefs.current = [];
-      void recorderRef.current?.stop();
-      recorderRef.current = null;
-      void playerRef.current?.close();
-      playerRef.current = null;
-      realtimeClientRef.current?.close();
-      realtimeClientRef.current = null;
+      cleanupRealtimeResources(intervalRefs, timerRefs, recorderRef, playerRef, realtimeClientRef);
     };
   }, [accessToken, dispatchRealtimeEvent, scenario]);
 
@@ -352,9 +339,7 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
       });
     }
     playerRef.current?.clearQueue();
-    dispatchRealtimeEvent({
-      type: 'local.cancel_ai_speech',
-    });
+    dispatchRealtimeEvent({ type: 'local.cancel_ai_speech' });
   };
 
   const handleEnd = async () => {
@@ -362,39 +347,28 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
     debugLog('PRACTICE', 'end requested', {
       sessionId: activeSessionId,
     });
-    timerRefs.current.forEach(clearTimeout);
-    timerRefs.current = [];
     intervalRefs.current.forEach(clearInterval);
     intervalRefs.current = [];
+    timerRefs.current.forEach(clearTimeout);
+    timerRefs.current = [];
     void recorderRef.current?.stop();
     recorderRef.current = null;
     playerRef.current?.clearQueue();
+
     if (activeSessionId) {
-      debugLog('PRACTICE', 'send ws end control', {
-        sessionId: activeSessionId,
-      });
       realtimeClientRef.current?.send({
-        payload: {
-          action: 'end',
-        },
+        payload: { action: 'end' },
         type: 'session_control',
       });
     }
 
     if (accessToken && activeSessionId) {
       try {
-        debugLog('PRACTICE', 'rest end session start', {
-          sessionId: activeSessionId,
-        });
         await endPracticeSession(accessToken, activeSessionId);
-        debugLog('PRACTICE', 'rest end session success', {
-          sessionId: activeSessionId,
-        });
       } catch {
         debugLog('PRACTICE', 'rest end session failed', {
           sessionId: activeSessionId,
         });
-        // Keep the UI moving even if the closeout call fails.
       }
     }
 
@@ -408,9 +382,7 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
       type: 'session_state',
     });
     dispatchRealtimeEvent({
-      payload: {
-        level: 0,
-      },
+      payload: { level: 0 },
       type: 'local.audio_level',
     });
     realtimeClientRef.current?.close();
@@ -418,110 +390,65 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-      <ScreenTitle eyebrow={`${scenario.title} · 低延迟通道`} title="实时对话" action="Ⅱ" />
-
-      <View style={styles.connectionCard}>
-        <View>
-          <Text style={styles.connectionTitle}>WebSocket 语音流</Text>
-          <Text style={styles.connectionSubtitle}>
-            {ApiRuntimeConfig.realtimeWsBaseUrl} · {statusLabel[status]} · {connectionStatus}
-          </Text>
+    <View
+      className="flex-1 px-4 pt-4"
+      style={{ backgroundColor: callRoom.background, flex: 1, paddingBottom: 18 }}
+    >
+      <StatusBar backgroundColor={callRoom.background} style="light" />
+      <Surface
+        className="mb-3 border px-4 py-3"
+        style={{ backgroundColor: callRoom.panel, borderColor: callRoom.border, borderRadius: 22 }}
+      >
+        <View className="flex-row items-center justify-between gap-3">
+          <View className="flex-1">
+            <Typography className="text-lg font-black" numberOfLines={1} style={{ color: callRoom.ink }}>
+              {scenario.title}
+            </Typography>
+            <View className="mt-2 flex-row items-center gap-2">
+              <View
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: status === 'error' ? AppPalette.danger : AppPalette.primary }}
+              />
+              <Typography className="text-xs font-semibold" numberOfLines={1} style={{ color: callRoom.muted }}>
+                {statusLabel[status]} / {connectionStatus} / {latencyMs}ms
+              </Typography>
+            </View>
+          </View>
+          <Chip color={status === 'error' ? 'danger' : 'accent'} size="sm" variant="soft">
+            Live
+          </Chip>
         </View>
-        <Text style={styles.latency}>{latencyMs}ms</Text>
-      </View>
+      </Surface>
 
-      <TranscriptPanel hints={hints} partialTurn={partialTurn} score={score} turns={turns} />
-      <SpeakingStatus elapsedSec={elapsedSec} level={audioLevel} status={status} />
-      <RealtimeControls onEnd={handleEnd} onInterrupt={handleInterrupt} status={status} />
-    </ScrollView>
-  );
-}
-
-function ScreenTitle({ eyebrow, title, action }: { eyebrow: string; title: string; action: string }) {
-  return (
-    <View style={styles.header}>
-      <View>
-        <Text style={styles.eyebrow}>{eyebrow}</Text>
-        <Text style={styles.title}>{title}</Text>
+      <View className="flex-1">
+        <TranscriptPanel hints={hints} partialTurn={partialTurn} score={score} turns={turns} />
+        <View className="absolute bottom-8 right-3">
+          <RealtimeControls
+            onEnd={handleEnd}
+            onInterrupt={handleInterrupt}
+            status={status}
+          />
+        </View>
       </View>
-      <Pressable accessibilityRole="button" style={styles.headerAction}>
-        <Text style={styles.headerActionText}>{action}</Text>
-      </Pressable>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  scrollContent: {
-    paddingBottom: 92,
-    paddingHorizontal: 22,
-    paddingTop: 20,
-  },
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 18,
-  },
-  eyebrow: {
-    color: AppPalette.muted,
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 0,
-  },
-  title: {
-    color: AppPalette.ink,
-    fontSize: 28,
-    fontWeight: '900',
-    letterSpacing: 0,
-    lineHeight: 34,
-  },
-  headerAction: {
-    alignItems: 'center',
-    backgroundColor: AppPalette.card,
-    borderColor: AppPalette.line,
-    borderRadius: 12,
-    borderWidth: 1,
-    height: 46,
-    justifyContent: 'center',
-    shadowColor: '#B8C2D6',
-    shadowOffset: { height: 10, width: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 20,
-    width: 46,
-  },
-  headerActionText: {
-    color: AppPalette.ink,
-    fontSize: 19,
-    fontWeight: '900',
-  },
-  connectionCard: {
-    alignItems: 'center',
-    backgroundColor: AppPalette.card,
-    borderColor: AppPalette.line,
-    borderRadius: 16,
-    borderWidth: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-    padding: 16,
-  },
-  connectionTitle: {
-    color: AppPalette.ink,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  connectionSubtitle: {
-    color: AppPalette.muted,
-    fontSize: 13,
-    fontWeight: '700',
-    marginTop: 4,
-  },
-  latency: {
-    color: AppPalette.green,
-    fontFamily: 'monospace',
-    fontSize: 14,
-    fontWeight: '900',
-  },
-});
+function cleanupRealtimeResources(
+  intervalRefs: MutableRefObject<ReturnType<typeof setInterval>[]>,
+  timerRefs: MutableRefObject<ReturnType<typeof setTimeout>[]>,
+  recorderRef: MutableRefObject<AudioApiRealtimeRecorder | null>,
+  playerRef: MutableRefObject<AudioApiRealtimePlayer | null>,
+  realtimeClientRef: MutableRefObject<RealtimeClient | null>,
+) {
+  intervalRefs.current.forEach(clearInterval);
+  intervalRefs.current = [];
+  timerRefs.current.forEach(clearTimeout);
+  timerRefs.current = [];
+  void recorderRef.current?.stop();
+  recorderRef.current = null;
+  void playerRef.current?.close();
+  playerRef.current = null;
+  realtimeClientRef.current?.close();
+  realtimeClientRef.current = null;
+}
