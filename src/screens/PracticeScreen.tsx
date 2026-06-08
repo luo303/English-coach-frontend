@@ -15,7 +15,7 @@ import { useErrorToast } from '@/hooks/useErrorToast';
 import { useAuthStore } from '@/state/authStore';
 import { useSessionStore } from '@/state/sessionStore';
 import { Scenario } from '@/types/practice';
-import { PracticeSessionState } from '@/types/realtime';
+import { PracticeSessionState, RealtimeReducerEvent } from '@/types/realtime';
 import { debugLog } from '@/utils/debugLog';
 
 type PracticeScreenProps = {
@@ -26,6 +26,7 @@ type PracticeScreenProps = {
 const statusLabel: Record<PracticeSessionState, string> = {
   assistant_speaking: 'AI 说话中',
   assistant_thinking: 'AI 思考中',
+  completed: '已完成',
   connecting: '连接中',
   ending: '结束中',
   error: '异常',
@@ -66,6 +67,8 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
   const recorderRef = useRef<AudioApiRealtimeRecorder | null>(null);
   const realtimeClientRef = useRef<RealtimeClient | null>(null);
   const statusRef = useRef<PracticeSessionState>(status);
+  const turnClientIdRef = useRef<string | null>(null);
+  const turnIndexRef = useRef(1);
   const timerRefs = useRef<ReturnType<typeof setTimeout>[]>([]);
   const intervalRefs = useRef<ReturnType<typeof setInterval>[]>([]);
   const lastAudioFrameLogAtRef = useRef(0);
@@ -140,6 +143,8 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
     audioSeqRef.current = 0;
     lastAudioFrameLogAtRef.current = 0;
     playedAudioIdsRef.current.clear();
+    turnClientIdRef.current = null;
+    turnIndexRef.current = 1;
     debugLog('PRACTICE', 'prepare session', {
       correctionMode: scenario.correctionMode,
       personaId: scenario.defaultPersonaId,
@@ -190,6 +195,7 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
         }
 
         activeSessionIdRef.current = session.sessionId;
+        turnClientIdRef.current = createTurnClientId(session.sessionId, turnIndexRef.current);
         debugLog('PRACTICE', 'create session success', {
           reportStatus: session.reportStatus,
           sessionId: session.sessionId,
@@ -203,8 +209,22 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
           type: 'local.reset_session',
         });
 
+        const handleRealtimeEvent = (event: RealtimeReducerEvent) => {
+          dispatchRealtimeEvent(event);
+
+          if (event.type === 'transcript_final' && event.payload.speaker === 'user') {
+            turnIndexRef.current += 1;
+            turnClientIdRef.current = createTurnClientId(session.sessionId, turnIndexRef.current);
+            debugLog('PRACTICE', 'rotate turn client id after user transcript final', {
+              nextTurnClientId: turnClientIdRef.current,
+              sessionId: session.sessionId,
+              turnId: event.payload.turnId,
+            });
+          }
+        };
+
         const client = new RealtimeClient({
-          onEvent: dispatchRealtimeEvent,
+          onEvent: handleRealtimeEvent,
           onStatusChange: (nextConnectionStatus) => {
             debugLog('PRACTICE', 'connection status', {
               connectionStatus: nextConnectionStatus,
@@ -248,6 +268,9 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
                   }
 
                   audioSeqRef.current += 1;
+                  const turnClientId =
+                    turnClientIdRef.current ?? createTurnClientId(activeSessionId, turnIndexRef.current);
+                  turnClientIdRef.current = turnClientId;
                   const now = Date.now();
                   if (now - lastAudioFrameLogAtRef.current > 2000) {
                     lastAudioFrameLogAtRef.current = now;
@@ -257,14 +280,16 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
                       sampleRate: frame.sampleRate,
                       seq: audioSeqRef.current,
                       sessionId: activeSessionId,
+                      turnClientId,
                     });
                   }
                   realtimeClientRef.current?.send({
                     payload: {
+                      channels: 1,
                       data: frame.audioBase64,
                       format: 'pcm16',
                       sampleRate: 16000,
-                      turnClientId: `${activeSessionId}-${audioSeqRef.current}`,
+                      turnClientId,
                     },
                     type: 'audio_chunk',
                   });
@@ -432,6 +457,10 @@ export function PracticeScreen({ scenario, onEnd }: PracticeScreenProps) {
       </View>
     </View>
   );
+}
+
+function createTurnClientId(sessionId: string, index: number) {
+  return `cturn_${sessionId}_${Date.now()}_${index}`;
 }
 
 function cleanupRealtimeResources(

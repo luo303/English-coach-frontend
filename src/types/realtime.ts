@@ -9,6 +9,7 @@ export type PracticeSessionState =
   | 'assistant_speaking'
   | 'interrupting'
   | 'ending'
+  | 'completed'
   | 'report_generating'
   | 'summary_ready'
   | 'error';
@@ -32,6 +33,7 @@ export type RealtimeHint = {
   title: string;
   message: string;
   severity: 'low' | 'medium' | 'high';
+  score?: number;
   turnId?: string;
 };
 
@@ -40,13 +42,14 @@ export type RealtimeScoreSnapshot = {
   pronunciation: number;
   grammar: number;
   fluency: number;
+  scenarioCompletion?: number;
 };
 
 export type AudioOutputChunk = {
   id: string;
   turnId: string;
   audioBase64: string;
-  format: 'pcm16' | 'mp3' | 'aac';
+  format: 'pcm16' | 'mp3' | 'aac' | 'text_mock';
   isFinal?: boolean;
   sampleRate: number;
 };
@@ -65,6 +68,7 @@ export type ClientRealtimeEvent =
         data: string;
         format: 'pcm16';
         sampleRate: 16000;
+        channels: 1;
         turnClientId: string;
       };
     }
@@ -81,13 +85,37 @@ export type ClientRealtimeEvent =
       };
     };
 
+export type ClientRealtimeEnvelope = ClientRealtimeEvent & {
+  clientSeq: number;
+  sessionId: string;
+  sentAt: string;
+};
+
 export type ServerRealtimeEvent =
+  | {
+      type: 'session_connected';
+      serverSeq: number;
+      sessionId: string;
+      payload: {
+        status: 'connected';
+      };
+    }
   | {
       type: 'session_ready';
       serverSeq: number;
       sessionId: string;
       payload: {
         latencyMs?: number;
+      };
+    }
+  | {
+      type: 'user_turn_received';
+      serverSeq: number;
+      sessionId: string;
+      payload: {
+        clientSeq?: number;
+        status: 'waiting_asr' | string;
+        turnClientId: string;
       };
     }
   | {

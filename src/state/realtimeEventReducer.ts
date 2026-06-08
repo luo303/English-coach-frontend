@@ -124,11 +124,18 @@ export function reduceRealtimeEvent(
         elapsedSec: state.elapsedSec + 1,
       };
 
-    case 'session_ready':
+    case 'session_connected':
       return {
         ...state,
         connectionStatus: 'connected',
+        latestServerSeq,
+      };
+
+    case 'session_ready':
+      return {
+        ...state,
         clientSeq: state.clientSeq + 1,
+        connectionStatus: 'connected',
         latencyMs: event.payload.latencyMs ?? state.latencyMs,
         latestServerSeq,
         sessionId: event.sessionId,
@@ -159,6 +166,14 @@ export function reduceRealtimeEvent(
         latestServerSeq,
         partialTurn: event.payload,
         status: 'assistant_speaking',
+      };
+
+    case 'user_turn_received':
+      return {
+        ...state,
+        clientSeq: state.clientSeq + 1,
+        latestServerSeq,
+        status: 'assistant_thinking',
       };
 
     case 'transcript_final':

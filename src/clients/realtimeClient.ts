@@ -1,6 +1,7 @@
 import { ApiRuntimeConfig } from '@/config/runtime';
 import {
   AudioOutputChunk,
+  ClientRealtimeEnvelope,
   ClientRealtimeEvent,
   PracticeSessionState,
   RealtimeConnectionStatus,
@@ -45,6 +46,10 @@ function asText(value: unknown, fallback = '') {
 
 function asNumber(value: unknown, fallback = 0) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function asOptionalNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function asBoolean(value: unknown, fallback = false) {
@@ -96,9 +101,14 @@ function normalizeTurn(payload: unknown, speakerFallback: 'user' | 'assistant', 
 
 function normalizeHint(type: RealtimeHint['type'], payload: unknown, idFallback: string): RealtimeHint {
   const nextPayload = isObject(payload) ? payload : {};
+  const id = pickText(
+    nextPayload,
+    ['id', 'pronunciationId', 'correctionId', 'hintId'],
+    idFallback,
+  );
   const title =
     type === 'pronunciation'
-      ? asText(nextPayload.word, '发音建议')
+      ? [asText(nextPayload.word), asText(nextPayload.phoneme)].filter(Boolean).join(' ') || '发音建议'
       : type === 'grammar'
         ? asText(nextPayload.quickFix, '语法建议')
         : '表达建议';
@@ -111,8 +121,9 @@ function normalizeHint(type: RealtimeHint['type'], payload: unknown, idFallback:
   const severity = nextPayload.severity === 'high' || nextPayload.severity === 'medium' ? nextPayload.severity : 'low';
 
   return {
-    id: asText(nextPayload.id, idFallback),
+    id,
     message,
+    score: asOptionalNumber(nextPayload.score) ?? asOptionalNumber(nextPayload.grammarScore),
     severity,
     title,
     turnId: asText(nextPayload.turnId, undefined as unknown as string),
@@ -122,18 +133,21 @@ function normalizeHint(type: RealtimeHint['type'], payload: unknown, idFallback:
 
 function normalizeScore(payload: unknown): RealtimeScoreSnapshot {
   const nextPayload = isObject(payload) ? payload : {};
+  const scores = isObject(nextPayload.scores) ? nextPayload.scores : {};
   return {
-    fluency: asNumber(nextPayload.fluency),
-    grammar: asNumber(nextPayload.grammar, asNumber(nextPayload.grammarScore)),
+    fluency: asNumber(scores.fluency, asNumber(nextPayload.fluency)),
+    grammar: asNumber(scores.grammar, asNumber(nextPayload.grammar, asNumber(nextPayload.grammarScore))),
     overall: asNumber(nextPayload.overall, asNumber(nextPayload.overallScore)),
-    pronunciation: asNumber(nextPayload.pronunciation),
+    pronunciation: asNumber(scores.pronunciation, asNumber(nextPayload.pronunciation)),
+    scenarioCompletion: asOptionalNumber(scores.scenarioCompletion),
   };
 }
 
 function normalizeAudioChunk(payload: unknown, serverSeq: number): AudioOutputChunk {
   const nextPayload = isObject(payload) ? payload : {};
   const rawFormat = asText(nextPayload.format);
-  const format: AudioOutputChunk['format'] = rawFormat === 'mp3' || rawFormat === 'aac' ? rawFormat : 'pcm16';
+  const format: AudioOutputChunk['format'] =
+    rawFormat === 'mp3' || rawFormat === 'aac' || rawFormat === 'text_mock' ? rawFormat : 'pcm16';
 
   return {
     audioBase64: pickText(nextPayload, ['data', 'audioBase64', 'audioData', 'base64', 'chunk']),
@@ -154,7 +168,9 @@ function normalizeServerEvent(raw: RawServerRealtimeEvent, sessionId: string, se
         payload: {
           status: 'connected',
         },
-        type: 'local.connection_status',
+        serverSeq,
+        sessionId,
+        type: 'session_connected',
       };
 
     case 'session.ready':
@@ -176,6 +192,18 @@ function normalizeServerEvent(raw: RawServerRealtimeEvent, sessionId: string, se
         serverSeq,
         sessionId,
         type: 'pong',
+      };
+
+    case 'user_turn_received':
+      return {
+        payload: {
+          clientSeq: asOptionalNumber(isObject(payload) ? payload.clientSeq : undefined),
+          status: asText(isObject(payload) ? payload.status : undefined, 'waiting_asr'),
+          turnClientId: asText(isObject(payload) ? payload.turnClientId : undefined),
+        },
+        serverSeq,
+        sessionId,
+        type: 'user_turn_received',
       };
 
     case 'transcript.partial':
@@ -200,7 +228,7 @@ function normalizeServerEvent(raw: RawServerRealtimeEvent, sessionId: string, se
     case 'ai_audio_chunk': {
       const chunk = normalizeAudioChunk(payload, serverSeq);
 
-      if (!chunk.audioBase64) {
+      if (!chunk.audioBase64 || chunk.format === 'text_mock') {
         if (chunk.isFinal) {
           return {
             payload: {
@@ -308,6 +336,7 @@ function summarizeClientEvent(event: ClientRealtimeEvent) {
     return {
       audioBase64Length: event.payload.data.length,
       format: event.payload.format,
+      channels: event.payload.channels,
       sampleRate: event.payload.sampleRate,
       turnClientId: event.payload.turnClientId,
       type: event.type,
@@ -409,6 +438,12 @@ function summarizeReducerEvent(event: RealtimeReducerEvent) {
         type: event.type,
       };
 
+    case 'session_connected':
+      return {
+        status: event.payload.status,
+        type: event.type,
+      };
+
     case 'local.connection_status':
       return {
         status: event.payload.status,
@@ -424,6 +459,7 @@ function summarizeReducerEvent(event: RealtimeReducerEvent) {
 
 export class RealtimeClient {
   private closedByUser = false;
+  private clientSeq = 0;
   private lastAudioSendLogAt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private retryCount = 0;
@@ -463,7 +499,8 @@ export class RealtimeClient {
       return false;
     }
 
-    const body = JSON.stringify(event);
+    const envelope = this.createEnvelope(event);
+    const body = JSON.stringify(envelope);
     const now = Date.now();
     if (event.type !== 'audio_chunk' || now - this.lastAudioSendLogAt > 2000) {
       if (event.type === 'audio_chunk') {
@@ -471,12 +508,23 @@ export class RealtimeClient {
       }
 
       debugLog('WS', 'send', {
+        clientSeq: envelope.clientSeq,
         event: summarizeClientEvent(event),
         url: realtimeLogUrl(this.options.sessionId),
       });
     }
     this.socket.send(body);
     return true;
+  }
+
+  private createEnvelope(event: ClientRealtimeEvent): ClientRealtimeEnvelope {
+    this.clientSeq += 1;
+    return {
+      ...event,
+      clientSeq: this.clientSeq,
+      sentAt: new Date().toISOString(),
+      sessionId: this.options.sessionId,
+    };
   }
 
   private sendRecordingStart() {
@@ -499,6 +547,7 @@ export class RealtimeClient {
         url: realtimeLogUrl(this.options.sessionId),
       });
       this.retryCount = 0;
+      this.clientSeq = 0;
     };
 
     socket.onmessage = (message) => {
@@ -518,9 +567,12 @@ export class RealtimeClient {
 
       this.options.onEvent(event);
 
-      if ('type' in event && event.type === 'local.connection_status' && event.payload.status === 'connected') {
-        this.options.onStatusChange?.('connected');
+      if (event.type === 'session_connected') {
         this.sendRecordingStart();
+      }
+
+      if (event.type === 'session_ready') {
+        this.options.onStatusChange?.('connected');
       }
     };
 

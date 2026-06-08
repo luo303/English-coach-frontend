@@ -14,6 +14,7 @@ type SpeakingStatusProps = {
 const statusCopy: Record<PracticeSessionState, string> = {
   assistant_speaking: 'AI 回应中',
   assistant_thinking: '思考中',
+  completed: '已完成',
   connecting: '连接中',
   ending: '收尾中',
   error: '连接异常',
